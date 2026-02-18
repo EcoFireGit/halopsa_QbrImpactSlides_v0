@@ -39,22 +39,11 @@ class HaloClient:
 
         try:
             response = requests.post(auth_url, data=payload, headers=headers)
-            response.raise_for_status()  # Raises error for 4xx/5xx responses
-
-            data = response.json()
-            self.token = data.get("access_token")
-
-            # Optional: Print expiration or other debug info
-            # print(f"Token obtained! Expires in: {data.get('expires_in')} seconds")
-
+            response.raise_for_status()
+            self.token = response.json().get("access_token")
             return self.token
-
-        except requests.exceptions.HTTPError as err:
-            print(f"Authentication Failed: {err}")
-            print(f"Response Body: {response.text}")
-            raise
         except Exception as e:
-            print(f"An error occurred: {e}")
+            print(f"Authentication Failed: {e}")
             raise
 
     def get_headers(self):
@@ -65,5 +54,41 @@ class HaloClient:
             self.authenticate()
         return {
             "Authorization": f"Bearer {self.token}",
+            "Accept": "application/json",
             "Content-Type": "application/json",
         }
+
+    def _get_request(self, endpoint, params=None):
+        """
+        Internal helper to handle GET requests to any Halo endpoint.
+        """
+        url = f"{self.host}/api/{endpoint}"
+        try:
+            response = requests.get(url, headers=self.get_headers(), params=params)
+            response.raise_for_status()
+            return response.json()
+        except requests.exceptions.HTTPError as err:
+            print(f"Request to {endpoint} failed: {err}")
+            print(f"Response: {response.text}")
+            return None
+
+    def get_tickets(self, start_date=None, end_date=None, page_size=10):
+        """
+        Fetches tickets from HaloPSA.
+        """
+        params = {
+            "page_size": page_size,
+            "order": "id desc",  # Get newest first
+            # "include_details": True # Uncomment if you need full body text
+        }
+
+        # HaloPSA typically filters dates via specific parameters or OData.
+        # For simplicity in this step, we fetch recent tickets and will filter in Python
+        # if the API doesn't support strict date params in your version.
+        # However, standard Halo params for date often look like this:
+        if start_date:
+            params["startdate"] = start_date
+        if end_date:
+            params["enddate"] = end_date
+
+        return self._get_request("Tickets", params)
