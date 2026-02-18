@@ -72,7 +72,7 @@ class HaloClient:
             print(f"Response: {response.text}")
             return None
 
-    def get_tickets(self, start_date=None, end_date=None, page_size=10):
+    def get_tickets(self, client_id=None, start_date=None, end_date=None, page_size=10):
         """
         Fetches tickets from HaloPSA.
         """
@@ -86,6 +86,8 @@ class HaloClient:
         # For simplicity in this step, we fetch recent tickets and will filter in Python
         # if the API doesn't support strict date params in your version.
         # However, standard Halo params for date often look like this:
+        if client_id:
+            params["client_id"] = client_id
         if start_date:
             params["startdate"] = start_date
         if end_date:
