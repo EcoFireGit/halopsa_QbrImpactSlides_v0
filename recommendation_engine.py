@@ -31,7 +31,10 @@ def generate_recommendations(
         A list of dicts, each with 'title' and 'rationale' keys.
         e.g. [{"title": "Implement SSO", "rationale": "5 tickets this quarter ..."}]
     """
-    client = anthropic.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
+    api_key = anthropic_api_key.strip() if anthropic_api_key else os.getenv("ANTHROPIC_API_KEY")
+    if not api_key:
+        raise ValueError("Anthropic API key is missing. Please enter it in the sidebar.")
+    client = anthropic.Anthropic(api_key=api_key)
 
     # ── Build the prompt ──────────────────────────────────────────────
     system_prompt = """You are a senior IT consultant and customer success strategist 
