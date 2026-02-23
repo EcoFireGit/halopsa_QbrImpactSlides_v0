@@ -263,47 +263,67 @@ def add_responsiveness_slide(prs):
         p.space_after = Pt(30)
 
 
-def add_recommendations(prs):
+def add_recommendations(prs, num_recommendations=3):
+    """Builds the recommendations slide with dynamic slots."""
     slide = prs.slides.add_slide(prs.slide_layouts[6])
 
     # Title
     title_box = slide.shapes.add_textbox(
-        Inches(0.5), Inches(0.5), Inches(9), Inches(0.8)
+        Inches(0.5), Inches(0.3), Inches(9), Inches(0.7)
     )
     title_frame = title_box.text_frame
     title_frame.text = "Strategic Recommendations"
-    title_frame.paragraphs[0].font.size = Pt(40)
+    title_frame.paragraphs[0].font.size = Pt(36)
     title_frame.paragraphs[0].font.bold = True
     title_frame.paragraphs[0].font.color.rgb = BLUE
 
-    # Three recommendation boxes
-    y_positions = [2, 3.5, 5]
-    for i in range(3):
+    # Dynamic vertical spacing based on number of recommendations
+    usable_height = 6.0  # inches available below title
+    slot_height = min(usable_height / num_recommendations, 1.0)
+    y_start = 1.2
+
+    for i in range(num_recommendations):
+        y_pos = y_start + (i * slot_height)
+
         # Number circle
         circle = slide.shapes.add_shape(
-            1, Inches(1.2), Inches(y_positions[i]), Inches(0.5), Inches(0.5)
+            1, Inches(0.5), Inches(y_pos), Inches(0.4), Inches(0.4)
         )
         circle.fill.solid()
         circle.fill.fore_color.rgb = BLUE
 
         num_text = slide.shapes.add_textbox(
-            Inches(1.2), Inches(y_positions[i]), Inches(0.5), Inches(0.5)
+            Inches(0.5), Inches(y_pos), Inches(0.4), Inches(0.4)
         )
         num_frame = num_text.text_frame
         num_frame.text = str(i + 1)
-        num_frame.paragraphs[0].font.size = Pt(24)
+        num_frame.paragraphs[0].font.size = Pt(16)
         num_frame.paragraphs[0].font.bold = True
         num_frame.paragraphs[0].font.color.rgb = RGBColor(255, 255, 255)
         num_frame.paragraphs[0].alignment = PP_ALIGN.CENTER
 
-        # Recommendation text
-        rec_box = slide.shapes.add_textbox(
-            Inches(2), Inches(y_positions[i]), Inches(6.5), Inches(0.8)
+        # Title placeholder
+        title_ph = slide.shapes.add_textbox(
+            Inches(1.1), Inches(y_pos), Inches(8.3), Inches(slot_height * 0.4)
         )
-        rec_frame = rec_box.text_frame
-        rec_frame.text = f"{{{{RECOMMENDATION_{i + 1}}}}}"
-        rec_frame.paragraphs[0].font.size = Pt(18)
-        rec_frame.paragraphs[0].font.color.rgb = GRAY
+        tf = title_ph.text_frame
+        tf.text = f"{{{{REC_{i + 1}_TITLE}}}}"
+        tf.paragraphs[0].font.size = Pt(14)
+        tf.paragraphs[0].font.bold = True
+        tf.paragraphs[0].font.color.rgb = BLUE
+
+        # Rationale placeholder
+        rat_ph = slide.shapes.add_textbox(
+            Inches(1.1),
+            Inches(y_pos + slot_height * 0.42),
+            Inches(8.3),
+            Inches(slot_height * 0.5),
+        )
+        rf = rat_ph.text_frame
+        rf.word_wrap = True
+        rf.text = f"{{{{REC_{i + 1}_RATIONALE}}}}"
+        rf.paragraphs[0].font.size = Pt(11)
+        rf.paragraphs[0].font.color.rgb = GRAY
 
 
 def add_thank_you(prs):

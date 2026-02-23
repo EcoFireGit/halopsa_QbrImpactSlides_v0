@@ -376,6 +376,25 @@ def generate_qbr(template_path, output_path, contextual_data, ticket_data):
         print("🧹 Temp chart file cleaned up.")
 
 
+def build_recommendation_replacements(recommendations: list[dict]) -> dict:
+    """
+    Converts Claude's recommendation list into PPTX placeholder key-value pairs.
+    Fills any unused slots (up to 10) with empty strings.
+    """
+    replacements = {}
+    for i in range(10):  # Always generate keys for all 10 possible slots
+        if i < len(recommendations):
+            replacements[f"{{{{REC_{i + 1}_TITLE}}}}"] = recommendations[i]["title"]
+            replacements[f"{{{{REC_{i + 1}_RATIONALE}}}}"] = recommendations[i][
+                "rationale"
+            ]
+        else:
+            # Clear unused slots so no placeholder text remains in the PPTX
+            replacements[f"{{{{REC_{i + 1}_TITLE}}}}"] = ""
+            replacements[f"{{{{REC_{i + 1}_RATIONALE}}}}"] = ""
+    return replacements
+
+
 # --- 3. EXECUTION WITH MOCK DATA ---
 
 if __name__ == "__main__":
