@@ -251,7 +251,7 @@ def calculate_metrics(tickets):
         # Critical tickets existed but all had invalid/negative ages
         crit_res_str = "< 1 hour"
     else:
-        crit_res_str = "No critical issues!"
+        crit_res_str = "< 1 hour"
 
     # Metric 4
     if valid_response_tickets > 0:

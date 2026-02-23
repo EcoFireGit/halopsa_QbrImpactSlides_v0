@@ -94,3 +94,15 @@ class HaloClient:
             params["enddate"] = end_date
 
         return self._get_request("Tickets", params)
+
+    def get_clients(self):
+        """
+        Fetches the list of active clients from HaloPSA.
+        Returns a list of dicts with 'id' and 'name'.
+        """
+        data = self._get_request("Client", params={"inactive": False})
+        clients = data.get("clients", []) if isinstance(data, dict) else []
+        return [
+            {"id": c.get("id"), "name": c.get("name", f"Client {c.get('id')}")}
+            for c in clients
+        ]
