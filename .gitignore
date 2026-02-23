@@ -209,3 +209,5 @@ __marimo__/
 # Any pptx files created
 *.pptx
 !Master_QBR_Template.pptx
+
+CLAUDE.md
