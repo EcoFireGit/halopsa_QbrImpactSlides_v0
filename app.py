@@ -335,15 +335,28 @@ if generate_btn:
         st.warning("Please enter your MSP contact information before generating.")
     elif start_date >= end_date:
         st.warning("Start date must be before end date.")
+    elif use_ai_recommendations and not anthropic_api_key:
+        st.warning(
+            "Please enter your Anthropic API key, or toggle off AI Recommendations."
+        )
     else:
+        # Build manual recommendations list if AI is toggled off
+        manual_recs = None
+        if not use_ai_recommendations:
+            manual_recs = [
+                st.session_state.get(f"manual_rec_{i}", "") for i in range(num_recs)
+            ]
+
         pptx_bytes, filename = run_qbr_generation(
             selected_client=selected_client,
             start_date=start_date,
             end_date=end_date,
             msp_contact=msp_contact,
-            rec1=rec1,
-            rec2=rec2,
-            rec3=rec3,
+            use_ai=use_ai_recommendations,
+            anthropic_key=anthropic_api_key,
+            num_recs=num_recs,
+            sample_size=sample_size,
+            manual_recs=manual_recs,
         )
 
         if pptx_bytes:
