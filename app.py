@@ -22,11 +22,7 @@ from generate_client_qbr import calculate_metrics, generate_qbr
 # ─────────────────────────────────────────────
 # PAGE CONFIG
 # ─────────────────────────────────────────────
-st.set_page_config(
-    page_title="MSP QBR Generator",
-    page_icon="📊",
-    layout="wide"
-)
+st.set_page_config(page_title="MSP QBR Generator", page_icon="📊", layout="wide")
 
 # ─────────────────────────────────────────────
 # SESSION STATE INITIALISATION
@@ -42,6 +38,7 @@ if "qbr_bytes" not in st.session_state:
 if "qbr_filename" not in st.session_state:
     st.session_state.qbr_filename = "QBR_Report.pptx"
 
+
 # ─────────────────────────────────────────────
 # HELPER FUNCTIONS
 # ─────────────────────────────────────────────
@@ -49,12 +46,12 @@ def try_authenticate(halo_url, client_id, client_secret):
     """Attempts to authenticate and fetch clients. Returns (success, error_msg)."""
     try:
         # Temporarily override env vars with form values
-        os.environ["HALO_HOST"]      = halo_url.rstrip("/")
-        os.environ["CLIENT_ID"]      = client_id
-        os.environ["CLIENT_SECRET"]  = client_secret
+        os.environ["HALO_HOST"] = halo_url.rstrip("/")
+        os.environ["CLIENT_ID"] = client_id
+        os.environ["CLIENT_SECRET"] = client_secret
 
         client = HaloClient()
-        token  = client.authenticate()
+        token = client.authenticate()
 
         if not token:
             return False, "Authentication failed: No token returned."
@@ -64,7 +61,7 @@ def try_authenticate(halo_url, client_id, client_secret):
             return False, "Authenticated, but no clients found in this Halo instance."
 
         st.session_state.halo_client = client
-        st.session_state.clients     = clients
+        st.session_state.clients = clients
         st.session_state.authenticated = True
         return True, None
 
@@ -72,52 +69,100 @@ def try_authenticate(halo_url, client_id, client_secret):
         return False, str(e)
 
 
-def run_qbr_generation(selected_client, start_date, end_date,
-                       msp_contact, rec1, rec2, rec3):
-    """
-    Fetches tickets, calculates metrics, populates the template,
-    and returns the PPTX as bytes.
-    """
-    client       = st.session_state.halo_client
-    client_id    = selected_client["id"]
-    client_name  = selected_client["name"]
-    review_period = f"{start_date.strftime('%B %d, %Y')} – {end_date.strftime('%B %d, %Y')}"
+def run_qbr_generation(
+    selected_client,
+    start_date,
+    end_date,
+    msp_contact,
+    use_ai,
+    anthropic_key,
+    num_recs,
+    sample_size,
+    manual_recs=None,
+):
+    from recommendation_engine import generate_recommendations
+    from generate_client_qbr import (
+        calculate_metrics,
+        generate_qbr,
+        build_recommendation_replacements,
+    )
 
-    # 1. Fetch ticket data
+    client = st.session_state.halo_client
+    client_id = selected_client["id"]
+    client_name = selected_client["name"]
+    review_period = (
+        f"{start_date.strftime('%B %d, %Y')} – {end_date.strftime('%B %d, %Y')}"
+    )
+
+    # 1. Fetch tickets
     with st.spinner("📡 Fetching tickets from HaloPSA..."):
         data = client.get_tickets(
             client_id=client_id,
-            start_date=start_date.strftime('%Y-%m-%d'),
-            end_date=end_date.strftime('%Y-%m-%d'),
-            page_size=500
+            start_date=start_date.strftime("%Y-%m-%d"),
+            end_date=end_date.strftime("%Y-%m-%d"),
+            page_size=500,
         )
-        tickets = data.get('tickets', []) if isinstance(data, dict) else (data or [])
+        tickets = data.get("tickets", []) if isinstance(data, dict) else (data or [])
 
     if not tickets:
-        st.warning(f"⚠️ No tickets found for **{client_name}** in the selected date range.")
+        st.warning(
+            f"⚠️ No tickets found for **{client_name}** in the selected date range."
+        )
         return None, None
 
-    st.info(f"✅ Retrieved **{len(tickets)}** tickets for {client_name}.")
+    st.info(f"✅ Retrieved **{len(tickets)}** tickets.")
 
-    # 2. Build contextual data dict
+    # 2. Compute metrics
+    metrics_data = calculate_metrics(tickets)
+
+    # 3. Generate recommendations
+    if use_ai and anthropic_key:
+        with st.spinner(f"🤖 Asking Claude to generate {num_recs} recommendations..."):
+            # Sample the most recent tickets up to sample_size
+            sampled = tickets[:sample_size]
+            summaries = [t.get("summary", "") for t in sampled if t.get("summary")]
+
+            try:
+                recommendations = generate_recommendations(
+                    client_name=client_name,
+                    review_period=review_period,
+                    metrics=metrics_data,
+                    ticket_summaries=summaries,
+                    num_recommendations=num_recs,
+                    anthropic_api_key=anthropic_key,
+                )
+                st.success(
+                    f"✅ Claude generated {len(recommendations)} recommendations."
+                )
+
+            except Exception as e:
+                st.error(f"❌ Claude API error: {e}")
+                return None, None
+    else:
+        # Use manual recommendations
+        recommendations = [
+            {"title": f"Recommendation {i + 1}", "rationale": rec}
+            for i, rec in enumerate(manual_recs or [])
+            if rec
+        ]
+
+    # 4. Build all replacement data
+    rec_replacements = build_recommendation_replacements(recommendations)
     contextual_data = {
-        "{{CLIENT_NAME}}":      client_name,
-        "{{REVIEW_PERIOD}}":    review_period,
+        "{{CLIENT_NAME}}": client_name,
+        "{{REVIEW_PERIOD}}": review_period,
         "{{CHART_PLACEHOLDER}}": "",
-        "{{RECOMMENDATION_1}}": rec1,
-        "{{RECOMMENDATION_2}}": rec2,
-        "{{RECOMMENDATION_3}}": rec3,
-        "{{MSP_CONTACT_INFO}}": msp_contact
+        "{{MSP_CONTACT_INFO}}": msp_contact,
+        **rec_replacements,
     }
 
-    # 3. Generate PPTX into a temp file
+    # 5. Generate PPTX
     with st.spinner("🛠️ Generating PowerPoint..."):
         template_path = "Master_QBR_Template.pptx"
         if not os.path.exists(template_path):
-            st.error("❌ Master_QBR_Template.pptx not found. Please run create_qbr_template.py first.")
+            st.error("❌ Master_QBR_Template.pptx not found.")
             return None, None
 
-        # Write output to a temp file then read back as bytes
         with tempfile.NamedTemporaryFile(suffix=".pptx", delete=False) as tmp:
             output_path = tmp.name
 
@@ -125,18 +170,15 @@ def run_qbr_generation(selected_client, start_date, end_date,
             template_path=template_path,
             output_path=output_path,
             contextual_data=contextual_data,
-            ticket_data=tickets
+            ticket_data=tickets,
         )
 
         with open(output_path, "rb") as f:
             pptx_bytes = f.read()
-
         os.remove(output_path)
 
-    # 4. Build filename
     safe_name = client_name.replace(" ", "_").replace("/", "-")
-    filename  = f"{safe_name}_QBR_{start_date.strftime('%Y%m%d')}_to_{end_date.strftime('%Y%m%d')}.pptx"
-
+    filename = f"{safe_name}_QBR_{start_date.strftime('%Y%m%d')}.pptx"
     return pptx_bytes, filename
 
 
@@ -144,7 +186,9 @@ def run_qbr_generation(selected_client, start_date, end_date,
 # UI LAYOUT
 # ─────────────────────────────────────────────
 st.title("📊 MSP QBR Generator")
-st.caption("Connect to your HaloPSA instance, select a client and date range, and generate a business impact report in one click.")
+st.caption(
+    "Connect to your HaloPSA instance, select a client and date range, and generate a business impact report in one click."
+)
 
 # ═══════════════════════════
 # SIDEBAR: Credentials
@@ -153,9 +197,27 @@ with st.sidebar:
     st.header("🔐 HaloPSA Connection")
     st.caption("Your credentials are used only for this session and are never stored.")
 
-    halo_url      = st.text_input("HaloPSA URL",      placeholder="https://your-instance.halopsa.com")
-    client_id     = st.text_input("Client ID",         placeholder="Your API Client ID")
-    client_secret = st.text_input("Client Secret",     placeholder="Your API Client Secret", type="password")
+    halo_url = st.text_input(
+        "HaloPSA URL", placeholder="https://your-instance.halopsa.com"
+    )
+    client_id = st.text_input("Client ID", placeholder="Your API Client ID")
+    client_secret = st.text_input(
+        "Client Secret", placeholder="Your API Client Secret", type="password"
+    )
+
+    st.markdown("---")
+    st.subheader("🤖 AI Recommendations")
+    anthropic_api_key = st.text_input(
+        "Anthropic API Key",
+        placeholder="sk-ant-...",
+        type="password",
+        help="Your Anthropic API key. Used only for this session and never stored.",
+    )
+    use_ai_recommendations = st.toggle(
+        "Generate AI Recommendations",
+        value=True,
+        help="Use Claude to generate strategic recommendations from ticket data.",
+    )
 
     connect_btn = st.button("🔌 Connect to HaloPSA", use_container_width=True)
 
@@ -166,7 +228,9 @@ with st.sidebar:
             with st.spinner("Connecting..."):
                 success, error = try_authenticate(halo_url, client_id, client_secret)
             if success:
-                st.success(f"✅ Connected! {len(st.session_state.clients)} clients found.")
+                st.success(
+                    f"✅ Connected! {len(st.session_state.clients)} clients found."
+                )
             else:
                 st.error(f"❌ Connection failed: {error}")
 
@@ -182,7 +246,9 @@ with st.sidebar:
 # MAIN AREA
 # ═══════════════════════════
 if not st.session_state.authenticated:
-    st.info("👈 Enter your HaloPSA credentials in the sidebar and click **Connect** to get started.")
+    st.info(
+        "👈 Enter your HaloPSA credentials in the sidebar and click **Connect** to get started."
+    )
     st.stop()
 
 # ── Section 1: Client & Date Selection ──
@@ -192,21 +258,21 @@ col1, col2 = st.columns([1, 1])
 
 with col1:
     client_options = {c["name"]: c for c in st.session_state.clients}
-    selected_name  = st.selectbox(
+    selected_name = st.selectbox(
         "Client",
         options=list(client_options.keys()),
-        help="Select the client for whom you want to generate the QBR."
+        help="Select the client for whom you want to generate the QBR.",
     )
     selected_client = client_options[selected_name]
 
 with col2:
-    default_end   = date.today()
+    default_end = date.today()
     default_start = default_end - timedelta(days=90)
 
     date_range = st.date_input(
         "Review Period",
         value=(default_start, default_end),
-        help="Select the start and end date for the QBR review period."
+        help="Select the start and end date for the QBR review period.",
     )
 
     # Validate the date range
@@ -217,44 +283,84 @@ with col2:
         st.stop()
 
 # ── Section 2: Recommendations ──
-st.header("2. Recommendations")
-st.caption("These will appear on the Recommendations slide. Edit them before generating.")
+st.header("2. AI Recommendations Settings")
 
-rec1 = st.text_input("Recommendation 1", value="Review user security training and phishing awareness.")
-rec2 = st.text_input("Recommendation 2", value="Upgrade legacy workstations that are causing recurring support issues.")
-rec3 = st.text_input("Recommendation 3", value="Schedule quarterly infrastructure assessment and capacity planning review.")
+col_a, col_b = st.columns([1, 1])
+
+with col_a:
+    num_recs = st.slider(
+        "Number of Recommendations",
+        min_value=1,
+        max_value=10,
+        value=3,
+        help="How many strategic recommendations Claude will generate.",
+    )
+
+with col_b:
+    sample_size = st.slider(
+        "Ticket Sample Size for AI Analysis",
+        min_value=10,
+        max_value=500,
+        value=100,
+        step=10,
+        help="Number of recent ticket summaries to send to Claude for analysis.",
+    )
+
+# Fallback manual recommendations (shown only if AI is toggled off)
+if not use_ai_recommendations:
+    st.caption("Enter recommendations manually:")
+    manual_recs = []
+    for i in range(num_recs):
+        manual_recs.append(
+            st.text_input(f"Recommendation {i + 1}", key=f"manual_rec_{i}")
+        )
 
 # ── Section 3: MSP Contact Info ──
 st.header("3. MSP Contact Info")
 msp_contact = st.text_input(
     "Account Manager Contact",
-    placeholder="Jane Doe | jdoe@yourmsp.com | (555) 123-4567"
+    placeholder="Jane Doe | jdoe@yourmsp.com | (555) 123-4567",
 )
 
 # ── Section 4: Generate ──
 st.markdown("---")
 st.header("4. Generate QBR")
 
-generate_btn = st.button("🚀 Generate QBR Report", type="primary", use_container_width=True)
+generate_btn = st.button(
+    "🚀 Generate QBR Report", type="primary", use_container_width=True
+)
 
 if generate_btn:
     if not msp_contact:
         st.warning("Please enter your MSP contact information before generating.")
     elif start_date >= end_date:
         st.warning("Start date must be before end date.")
+    elif use_ai_recommendations and not anthropic_api_key:
+        st.warning(
+            "Please enter your Anthropic API key, or toggle off AI Recommendations."
+        )
     else:
+        # Build manual recommendations list if AI is toggled off
+        manual_recs = None
+        if not use_ai_recommendations:
+            manual_recs = [
+                st.session_state.get(f"manual_rec_{i}", "") for i in range(num_recs)
+            ]
+
         pptx_bytes, filename = run_qbr_generation(
             selected_client=selected_client,
             start_date=start_date,
             end_date=end_date,
             msp_contact=msp_contact,
-            rec1=rec1,
-            rec2=rec2,
-            rec3=rec3
+            use_ai=use_ai_recommendations,
+            anthropic_key=anthropic_api_key,
+            num_recs=num_recs,
+            sample_size=sample_size,
+            manual_recs=manual_recs,
         )
 
         if pptx_bytes:
-            st.session_state.qbr_bytes    = pptx_bytes
+            st.session_state.qbr_bytes = pptx_bytes
             st.session_state.qbr_filename = filename
             st.success(f"🎉 QBR generated successfully for **{selected_name}**!")
 
@@ -266,7 +372,6 @@ if st.session_state.qbr_bytes:
         data=st.session_state.qbr_bytes,
         file_name=st.session_state.qbr_filename,
         mime="application/vnd.openxmlformats-officedocument.presentationml.presentation",
-        use_container_width=True
+        use_container_width=True,
     )
     st.caption(f"📁 File: `{st.session_state.qbr_filename}`")
-
