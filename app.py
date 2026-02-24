@@ -12,8 +12,7 @@ Usage:
 import streamlit as st
 import tempfile
 import os
-import io
-from datetime import datetime, timedelta, date
+from datetime import timedelta, date
 
 # Import modules from previous weeks
 from halo_client import HaloClient
@@ -82,8 +81,6 @@ def run_qbr_generation(
 ):
     from recommendation_engine import generate_recommendations
     from generate_client_qbr import (
-        calculate_metrics,
-        generate_qbr,
         build_recommendation_replacements,
     )
 

@@ -308,7 +308,6 @@ def generate_qbr(template_path, output_path, contextual_data, ticket_data):
     Loads the template, computes metrics, inserts the chart image,
     replaces all text placeholders, and saves the final PPTX.
     """
-    from pptx.util import Inches
 
     if not os.path.exists(template_path):
         print(

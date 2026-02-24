@@ -8,13 +8,14 @@ import os
 import json
 import anthropic
 
+
 def generate_recommendations(
     client_name: str,
     review_period: str,
     metrics: dict,
     ticket_summaries: list[str],
     num_recommendations: int = 3,
-    anthropic_api_key: str = None
+    anthropic_api_key: str = None,
 ) -> list[dict]:
     """
     Calls Claude to generate strategic QBR recommendations.
@@ -31,9 +32,15 @@ def generate_recommendations(
         A list of dicts, each with 'title' and 'rationale' keys.
         e.g. [{"title": "Implement SSO", "rationale": "5 tickets this quarter ..."}]
     """
-    api_key = anthropic_api_key.strip() if anthropic_api_key else os.getenv("ANTHROPIC_API_KEY")
+    api_key = (
+        anthropic_api_key.strip()
+        if anthropic_api_key
+        else os.getenv("ANTHROPIC_API_KEY")
+    )
     if not api_key:
-        raise ValueError("Anthropic API key is missing. Please enter it in the sidebar.")
+        raise ValueError(
+            "Anthropic API key is missing. Please enter it in the sidebar."
+        )
     client = anthropic.Anthropic(api_key=api_key)
 
     # ── Build the prompt ──────────────────────────────────────────────
@@ -59,18 +66,20 @@ Output format:
 ]"""
 
     # Format metrics into readable text for the prompt
-    metrics_text = "\n".join([
-        f"- Total Tickets: {metrics.get('{{TICKET_COUNT}}', 'N/A')}",
-        f"- Same-Day Resolution Rate: {metrics.get('{{SAME_DAY_RATE}}', 'N/A')}%",
-        f"- Average First Response Time: {metrics.get('{{AVG_FIRST_RESPONSE}}', 'N/A')}",
-        f"- Critical Issue Resolution Time: {metrics.get('{{CRITICAL_RES_TIME}}', 'N/A')}",
-        f"- Proactive Work: {metrics.get('{{PROACTIVE_PERCENT}}', 'N/A')}%",
-        f"- Reactive Work: {metrics.get('{{REACTIVE_PERCENT}}', 'N/A')}%",
-    ])
+    metrics_text = "\n".join(
+        [
+            f"- Total Tickets: {metrics.get('{{TICKET_COUNT}}', 'N/A')}",
+            f"- Same-Day Resolution Rate: {metrics.get('{{SAME_DAY_RATE}}', 'N/A')}%",
+            f"- Average First Response Time: {metrics.get('{{AVG_FIRST_RESPONSE}}', 'N/A')}",
+            f"- Critical Issue Resolution Time: {metrics.get('{{CRITICAL_RES_TIME}}', 'N/A')}",
+            f"- Proactive Work: {metrics.get('{{PROACTIVE_PERCENT}}', 'N/A')}%",
+            f"- Reactive Work: {metrics.get('{{REACTIVE_PERCENT}}', 'N/A')}%",
+        ]
+    )
 
     # Format ticket summaries as a numbered list
     summaries_text = "\n".join(
-        [f"{i+1}. {s}" for i, s in enumerate(ticket_summaries) if s and s.strip()]
+        [f"{i + 1}. {s}" for i, s in enumerate(ticket_summaries) if s and s.strip()]
     )
 
     user_prompt = f"""Please generate exactly {num_recommendations} strategic recommendations 
@@ -94,7 +103,7 @@ Mix data-driven insights from the ticket summaries with general IT best practice
         model="claude-sonnet-4-5-20250929",
         max_tokens=2048,
         system=system_prompt,
-        messages=[{"role": "user", "content": user_prompt}]
+        messages=[{"role": "user", "content": user_prompt}],
     )
 
     raw_text = response.content[0].text.strip()
@@ -113,9 +122,11 @@ Mix data-driven insights from the ticket summaries with general IT best practice
     validated = []
     for rec in recommendations:
         if isinstance(rec, dict) and "title" in rec and "rationale" in rec:
-            validated.append({
-                "title": str(rec["title"]).strip(),
-                "rationale": str(rec["rationale"]).strip()
-            })
+            validated.append(
+                {
+                    "title": str(rec["title"]).strip(),
+                    "rationale": str(rec["rationale"]).strip(),
+                }
+            )
 
     return validated

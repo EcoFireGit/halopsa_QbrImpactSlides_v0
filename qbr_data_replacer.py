@@ -133,7 +133,7 @@ def replace_qbr_placeholders(template_path, data, output_path=None):
     # Save the modified presentation
     prs.save(output_path)
 
-    print(f"\n✅ Success!")
+    print("\n✅ Success!")
     print(f"   • Slides modified: {slides_modified}/{len(prs.slides)}")
     print(f"   • Total shape replacements: {total_replacements}")
     print(f"   • Output saved to: {output_path}")
