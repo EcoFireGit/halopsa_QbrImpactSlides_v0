@@ -311,6 +311,30 @@ with st.sidebar:
         help="Use Claude to generate strategic recommendations from ticket data.",
     )
 
+    num_recs = st.slider(
+        "Number of Recommendations",
+        min_value=1,
+        max_value=10,
+        value=3,
+        help="How many strategic recommendations Claude will generate.",
+    )
+    sample_size = st.slider(
+        "Ticket Sample Size for AI Analysis",
+        min_value=10,
+        max_value=500,
+        value=100,
+        step=10,
+        help="Number of recent ticket summaries to send to Claude for analysis.",
+    )
+
+    if not use_ai_recommendations:
+        st.caption("Enter recommendations manually:")
+        manual_recs = []
+        for i in range(num_recs):
+            manual_recs.append(
+                st.text_input(f"Recommendation {i + 1}", key=f"manual_rec_{i}")
+            )
+
     st.markdown("---")
     st.subheader("📈 Economic Context (BEA)")
     bea_api_key = st.text_input(
@@ -399,49 +423,16 @@ else:
     selected_industry_name = None
     st.info("Enter a BEA API key in the sidebar to include industry economic context.")
 
-# ── Section 3: Recommendations ──
-st.header("3. AI Recommendations Settings")
-
-col_a, col_b = st.columns([1, 1])
-
-with col_a:
-    num_recs = st.slider(
-        "Number of Recommendations",
-        min_value=1,
-        max_value=10,
-        value=3,
-        help="How many strategic recommendations Claude will generate.",
-    )
-
-with col_b:
-    sample_size = st.slider(
-        "Ticket Sample Size for AI Analysis",
-        min_value=10,
-        max_value=500,
-        value=100,
-        step=10,
-        help="Number of recent ticket summaries to send to Claude for analysis.",
-    )
-
-# Fallback manual recommendations (shown only if AI is toggled off)
-if not use_ai_recommendations:
-    st.caption("Enter recommendations manually:")
-    manual_recs = []
-    for i in range(num_recs):
-        manual_recs.append(
-            st.text_input(f"Recommendation {i + 1}", key=f"manual_rec_{i}")
-        )
-
-# ── Section 4: MSP Contact Info ──
-st.header("4. MSP Contact Info")
+# ── Section 3: MSP Contact Info ──
+st.header("3. MSP Contact Info")
 msp_contact = st.text_input(
     "Account Manager Contact",
     placeholder="Jane Doe | jdoe@yourmsp.com | (555) 123-4567",
 )
 
-# ── Section 5: Generate ──
+# ── Section 4: Generate ──
 st.markdown("---")
-st.header("5. Generate QBR")
+st.header("4. Generate QBR")
 
 generate_btn = st.button(
     "🚀 Generate QBR Report", type="primary", use_container_width=True
