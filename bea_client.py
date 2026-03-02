@@ -58,9 +58,17 @@ class BEAClient:
 
         payload = response.json()
 
-        results = payload.get("BEAAPI", {}).get("Results")
+        beaapi = payload.get("BEAAPI", {})
 
-        # BEA-level errors: Results is a dict containing an "Error" key
+        # Top-level API errors (e.g. invalid industry code) come back as BEAAPI.Error
+        top_error = beaapi.get("Error")
+        if top_error:
+            detail = top_error.get("ErrorDetail", {}).get("Description", top_error)
+            raise ValueError(f"BEA API error: {detail}")
+
+        results = beaapi.get("Results")
+
+        # Results-level errors: Results is a dict containing an "Error" key
         if isinstance(results, dict) and results.get("Error"):
             raise ValueError(f"BEA API error: {results['Error']}")
 
