@@ -36,6 +36,10 @@ if "qbr_bytes" not in st.session_state:
     st.session_state.qbr_bytes = None
 if "qbr_filename" not in st.session_state:
     st.session_state.qbr_filename = "QBR_Report.pptx"
+if "bea_insights" not in st.session_state:
+    st.session_state.bea_insights = None
+if "bea_industry_name" not in st.session_state:
+    st.session_state.bea_industry_name = None
 
 
 # ─────────────────────────────────────────────
@@ -68,6 +72,67 @@ def try_authenticate(halo_url, client_id, client_secret):
         return False, str(e)
 
 
+def _render_bea_panel(insights: dict, industry_name: str):
+    """Render the BEA economic context panel: metrics + trend chart."""
+    import matplotlib.pyplot as plt
+    import matplotlib.ticker as mticker
+
+    st.subheader("📈 Industry Economic Context (BEA)")
+
+    col1, col2, col3, col4 = st.columns(4)
+    with col1:
+        st.metric("Sector GDP Value", insights.get("latest_value", "N/A"))
+    with col2:
+        qoq = insights.get("qoq_pct", "N/A")
+        direction = insights.get("qoq_direction", "flat")
+        delta_color = "normal" if direction != "flat" else "off"
+        st.metric(
+            "QoQ Growth",
+            qoq,
+            delta=qoq if qoq != "N/A" else None,
+            delta_color=delta_color,
+        )
+    with col3:
+        yoy = insights.get("yoy_pct", "N/A")
+        direction_y = insights.get("yoy_direction", "flat")
+        delta_color_y = "normal" if direction_y != "flat" else "off"
+        st.metric(
+            "YoY Growth",
+            yoy,
+            delta=yoy if yoy != "N/A" else None,
+            delta_color=delta_color_y,
+        )
+    with col4:
+        st.metric("Latest Period", insights.get("latest_period", "N/A"))
+
+    # Trend chart
+    labels = insights.get("trend_labels", [])
+    values = insights.get("trend_values", [])
+    valid_pairs = [(lbl, val) for lbl, val in zip(labels, values) if val is not None]
+    if valid_pairs:
+        chart_labels, chart_values = zip(*valid_pairs)
+        # Convert millions → billions
+        chart_values_b = [v / 1000 for v in chart_values]
+
+        fig, ax = plt.subplots(figsize=(9, 2.5))
+        ax.plot(chart_labels, chart_values_b, marker="o", color="#2E5C8A", linewidth=2)
+        ax.fill_between(chart_labels, chart_values_b, alpha=0.15, color="#2E5C8A")
+        ax.set_ylabel("GDP ($B, chained 2017$)", fontsize=9)
+        ax.yaxis.set_major_formatter(mticker.FuncFormatter(lambda x, _: f"${x:.0f}B"))
+        ax.tick_params(axis="x", labelsize=8, rotation=30)
+        ax.tick_params(axis="y", labelsize=8)
+        ax.set_title(f"{industry_name} — 8-Quarter GDP Trend", fontsize=10)
+        ax.spines[["top", "right"]].set_visible(False)
+        fig.tight_layout()
+        st.pyplot(fig)
+        plt.close(fig)
+
+    st.caption(
+        "Source: U.S. Bureau of Economic Analysis (BEA), GDP by Industry. "
+        "Data subject to ~1 quarter publication lag. Values in chained 2017 dollars."
+    )
+
+
 def run_qbr_generation(
     selected_client,
     start_date,
@@ -78,10 +143,19 @@ def run_qbr_generation(
     num_recs,
     sample_size,
     manual_recs=None,
+    bea_api_key=None,
+    selected_industry_name=None,
 ):
     from recommendation_engine import generate_recommendations
     from generate_client_qbr import (
         build_recommendation_replacements,
+    )
+    from bea_client import BEAClient
+    from bea_insights import (
+        INDUSTRY_SECTORS,
+        calculate_sector_growth,
+        format_bea_replacements,
+        build_empty_bea_replacements,
     )
 
     client = st.session_state.halo_client
@@ -111,6 +185,26 @@ def run_qbr_generation(
 
     # 2. Compute metrics
     metrics_data = calculate_metrics(tickets)
+
+    # 2.5 Fetch BEA economic context (optional)
+    bea_replacements = build_empty_bea_replacements()
+    if bea_api_key and selected_industry_name:
+        with st.spinner(f"📊 Fetching BEA data for {selected_industry_name}..."):
+            try:
+                bea_client = BEAClient(api_key=bea_api_key)
+                raw_rows = bea_client.get_gdp_by_industry(
+                    INDUSTRY_SECTORS[selected_industry_name], num_quarters=8
+                )
+                insights = calculate_sector_growth(raw_rows)
+                bea_replacements = format_bea_replacements(
+                    selected_industry_name, insights
+                )
+                st.session_state.bea_insights = insights
+                st.session_state.bea_industry_name = selected_industry_name
+            except (ValueError, Exception) as e:
+                st.warning(
+                    f"BEA data unavailable: {e}. QBR proceeds without economic context."
+                )
 
     # 3. Generate recommendations
     if use_ai and anthropic_key:
@@ -151,6 +245,7 @@ def run_qbr_generation(
         "{{CHART_PLACEHOLDER}}": "",
         "{{MSP_CONTACT_INFO}}": msp_contact,
         **rec_replacements,
+        **bea_replacements,
     }
 
     # 5. Generate PPTX
@@ -216,6 +311,15 @@ with st.sidebar:
         help="Use Claude to generate strategic recommendations from ticket data.",
     )
 
+    st.markdown("---")
+    st.subheader("📈 Economic Context (BEA)")
+    bea_api_key = st.text_input(
+        "BEA API Key",
+        placeholder="Get free key at apps.bea.gov/api/signup",
+        type="password",
+        help="Optional. Free registration at apps.bea.gov/api/signup.",
+    )
+
     connect_btn = st.button("🔌 Connect to HaloPSA", use_container_width=True)
 
     if connect_btn:
@@ -279,8 +383,24 @@ with col2:
         st.warning("Please select both a start and end date.")
         st.stop()
 
-# ── Section 2: Recommendations ──
-st.header("2. AI Recommendations Settings")
+# ── Section 2: Economic Context ──
+st.header("2. Economic Context (Optional)")
+if bea_api_key:
+    from bea_insights import INDUSTRY_SECTORS
+
+    selected_industry_name = st.selectbox(
+        "Client's Industry Sector",
+        options=list(INDUSTRY_SECTORS.keys()),
+        index=0,
+        key=f"bea_industry_{selected_client['id']}",
+    )
+    st.caption(f"BEA sector code: `{INDUSTRY_SECTORS[selected_industry_name]}`")
+else:
+    selected_industry_name = None
+    st.info("Enter a BEA API key in the sidebar to include industry economic context.")
+
+# ── Section 3: Recommendations ──
+st.header("3. AI Recommendations Settings")
 
 col_a, col_b = st.columns([1, 1])
 
@@ -312,16 +432,16 @@ if not use_ai_recommendations:
             st.text_input(f"Recommendation {i + 1}", key=f"manual_rec_{i}")
         )
 
-# ── Section 3: MSP Contact Info ──
-st.header("3. MSP Contact Info")
+# ── Section 4: MSP Contact Info ──
+st.header("4. MSP Contact Info")
 msp_contact = st.text_input(
     "Account Manager Contact",
     placeholder="Jane Doe | jdoe@yourmsp.com | (555) 123-4567",
 )
 
-# ── Section 4: Generate ──
+# ── Section 5: Generate ──
 st.markdown("---")
-st.header("4. Generate QBR")
+st.header("5. Generate QBR")
 
 generate_btn = st.button(
     "🚀 Generate QBR Report", type="primary", use_container_width=True
@@ -354,6 +474,8 @@ if generate_btn:
             num_recs=num_recs,
             sample_size=sample_size,
             manual_recs=manual_recs,
+            bea_api_key=bea_api_key,
+            selected_industry_name=selected_industry_name,
         )
 
         if pptx_bytes:
@@ -361,7 +483,13 @@ if generate_btn:
             st.session_state.qbr_filename = filename
             st.success(f"🎉 QBR generated successfully for **{selected_name}**!")
 
-# ── Section 5: Download ──
+            if st.session_state.bea_insights:
+                _render_bea_panel(
+                    st.session_state.bea_insights,
+                    st.session_state.bea_industry_name,
+                )
+
+# ── Section 6: Download ──
 if st.session_state.qbr_bytes:
     st.markdown("---")
     st.download_button(

@@ -83,6 +83,42 @@ def add_executive_summary(prs):
         p.font.color.rgb = GRAY
         p.space_after = Pt(24)
 
+    # BEA economic context box — light-blue background with BLUE border
+    LIGHT_BLUE = RGBColor(219, 234, 254)  # #DBEAFE
+    bea_box = slide.shapes.add_shape(
+        1, Inches(0.5), Inches(6.0), Inches(9), Inches(1.2)
+    )
+    bea_box.fill.solid()
+    bea_box.fill.fore_color.rgb = LIGHT_BLUE
+    bea_box.line.color.rgb = BLUE
+
+    # Line 1: Industry and GDP value
+    line1_box = slide.shapes.add_textbox(
+        Inches(0.65), Inches(6.05), Inches(8.7), Inches(0.45)
+    )
+    line1_frame = line1_box.text_frame
+    line1_frame.word_wrap = True
+    line1_frame.text = (
+        "Industry Sector: {{BEA_INDUSTRY}}  |  "
+        "GDP Value Added: {{BEA_LATEST_VALUE}} ({{BEA_LATEST_PERIOD}})"
+    )
+    line1_frame.paragraphs[0].font.size = Pt(13)
+    line1_frame.paragraphs[0].font.bold = True
+    line1_frame.paragraphs[0].font.color.rgb = BLUE
+
+    # Line 2: Growth rates and trend label
+    line2_box = slide.shapes.add_textbox(
+        Inches(0.65), Inches(6.55), Inches(8.7), Inches(0.5)
+    )
+    line2_frame = line2_box.text_frame
+    line2_frame.word_wrap = True
+    line2_frame.text = (
+        "QoQ Growth: {{BEA_QOQ_GROWTH}}  |  "
+        "YoY Growth: {{BEA_YOY_GROWTH}}  |  {{BEA_TREND_LABEL}}"
+    )
+    line2_frame.paragraphs[0].font.size = Pt(12)
+    line2_frame.paragraphs[0].font.color.rgb = GRAY
+
 
 def add_metrics_overview(prs):
     slide = prs.slides.add_slide(prs.slide_layouts[6])
@@ -391,6 +427,12 @@ def main():
         "{{RECOMMENDATION_2}}",
         "{{RECOMMENDATION_3}}",
         "{{MSP_CONTACT_INFO}}",
+        "{{BEA_INDUSTRY}}",
+        "{{BEA_LATEST_VALUE}}",
+        "{{BEA_LATEST_PERIOD}}",
+        "{{BEA_QOQ_GROWTH}}",
+        "{{BEA_YOY_GROWTH}}",
+        "{{BEA_TREND_LABEL}}",
     ]
     for p in placeholders:
         print(f"   • {p}")
