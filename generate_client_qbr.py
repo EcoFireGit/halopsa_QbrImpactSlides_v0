@@ -303,7 +303,38 @@ def replace_text_in_shape(shape, replacements):
             replace_text_in_shape(child_shape, replacements)
 
 
-def generate_qbr(template_path, output_path, contextual_data, ticket_data):
+def _remove_unused_rec_slots(slide, num_recs):
+    """Delete the circle, number, title, and rationale shapes for slots N > num_recs."""
+    if num_recs >= 10:
+        return
+
+    shapes_to_delete = []
+    tops_to_delete = set()
+
+    # First pass: find title/rationale textboxes for unused slots
+    for shape in slide.shapes:
+        if not shape.has_text_frame:
+            continue
+        for para in shape.text_frame.paragraphs:
+            for run in para.runs:
+                for n in range(num_recs + 1, 11):
+                    if f"{{{{REC_{n}_TITLE}}}}" in run.text:
+                        tops_to_delete.add(shape.top)
+                        shapes_to_delete.append(shape)
+                    elif f"{{{{REC_{n}_RATIONALE}}}}" in run.text:
+                        shapes_to_delete.append(shape)
+
+    # Second pass: delete circle + number textbox at same top as unused title shapes
+    for shape in slide.shapes:
+        if shape not in shapes_to_delete and shape.top in tops_to_delete:
+            shapes_to_delete.append(shape)
+
+    sp_tree = slide.shapes._spTree
+    for shape in shapes_to_delete:
+        sp_tree.remove(shape._element)
+
+
+def generate_qbr(template_path, output_path, contextual_data, ticket_data, num_recs=10):
     """
     Loads the template, computes metrics, inserts the chart image,
     replaces all text placeholders, and saves the final PPTX.
@@ -333,6 +364,10 @@ def generate_qbr(template_path, output_path, contextual_data, ticket_data):
 
     # 4. Open the presentation
     prs = Presentation(template_path)
+
+    # Remove shapes for unused recommendation slots
+    for slide in prs.slides:
+        _remove_unused_rec_slots(slide, num_recs)
 
     for slide in prs.slides:
         chart_inserted = False

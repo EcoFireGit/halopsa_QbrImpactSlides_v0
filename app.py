@@ -9,14 +9,28 @@ Usage:
     streamlit run app.py
 """
 
-import streamlit as st
-import tempfile
 import os
-from datetime import timedelta, date
+import tempfile
+from datetime import date, timedelta
 
-# Import modules from previous weeks
-from halo_client import HaloClient
+import streamlit as st
+from dotenv import load_dotenv
+
 from generate_client_qbr import calculate_metrics, generate_qbr
+from halo_client import HaloClient
+
+# Load .env from the current working directory (values are fallbacks if not
+# entered by the user in the sidebar).
+load_dotenv()
+
+# ─────────────────────────────────────────────
+# ENV DEFAULTS (used to pre-fill sidebar fields)
+# ─────────────────────────────────────────────
+_env_halo_url = os.environ.get("HALO_HOST", "")
+_env_client_id = os.environ.get("CLIENT_ID", "")
+_env_client_secret = os.environ.get("CLIENT_SECRET", "")
+_env_anthropic_key = os.environ.get("ANTHROPIC_API_KEY", "")
+_env_bea_key = os.environ.get("BEA_API_KEY", "")
 
 # ─────────────────────────────────────────────
 # PAGE CONFIG
@@ -40,6 +54,10 @@ if "bea_insights" not in st.session_state:
     st.session_state.bea_insights = None
 if "bea_industry_name" not in st.session_state:
     st.session_state.bea_industry_name = None
+if "num_recs" not in st.session_state:
+    st.session_state.num_recs = 3
+if "sample_size" not in st.session_state:
+    st.session_state.sample_size = 100
 
 
 # ─────────────────────────────────────────────
@@ -263,6 +281,7 @@ def run_qbr_generation(
             output_path=output_path,
             contextual_data=contextual_data,
             ticket_data=tickets,
+            num_recs=num_recs,
         )
 
         with open(output_path, "rb") as f:
@@ -287,50 +306,48 @@ st.caption(
 # ═══════════════════════════
 with st.sidebar:
     st.header("🔐 HaloPSA Connection")
-    st.caption("Your credentials are used only for this session and are never stored.")
+    st.caption(
+        "All fields are optional if the corresponding values are set in a `.env` file "
+        "in the working directory. Entered values take precedence over `.env`."
+    )
 
     halo_url = st.text_input(
-        "HaloPSA URL", placeholder="https://your-instance.halopsa.com"
+        "HaloPSA URL",
+        value=_env_halo_url,
+        placeholder="https://your-instance.halopsa.com",
     )
-    client_id = st.text_input("Client ID", placeholder="Your API Client ID")
+    client_id = st.text_input(
+        "Client ID",
+        value=_env_client_id,
+        placeholder="Your API Client ID",
+    )
     client_secret = st.text_input(
-        "Client Secret", placeholder="Your API Client Secret", type="password"
+        "Client Secret",
+        value=_env_client_secret,
+        placeholder="Your API Client Secret",
+        type="password",
     )
 
     st.markdown("---")
     st.subheader("🤖 AI Recommendations")
     anthropic_api_key = st.text_input(
         "Anthropic API Key",
+        value=_env_anthropic_key,
         placeholder="sk-ant-...",
         type="password",
-        help="Your Anthropic API key. Used only for this session and never stored.",
+        help="Used only for this session. Leave blank to use ANTHROPIC_API_KEY from .env.",
     )
     use_ai_recommendations = st.toggle(
         "Generate AI Recommendations",
         value=True,
         help="Use Claude to generate strategic recommendations from ticket data.",
     )
-
-    num_recs = st.slider(
-        "Number of Recommendations",
-        min_value=1,
-        max_value=10,
-        value=3,
-        help="How many strategic recommendations Claude will generate.",
-    )
-    sample_size = st.slider(
-        "Ticket Sample Size for AI Analysis",
-        min_value=10,
-        max_value=500,
-        value=100,
-        step=10,
-        help="Number of recent ticket summaries to send to Claude for analysis.",
-    )
+    st.caption("Configure recommendation count and sample size in ⚙️ Settings.")
 
     if not use_ai_recommendations:
         st.caption("Enter recommendations manually:")
         manual_recs = []
-        for i in range(num_recs):
+        for i in range(st.session_state.num_recs):
             manual_recs.append(
                 st.text_input(f"Recommendation {i + 1}", key=f"manual_rec_{i}")
             )
@@ -339,16 +356,20 @@ with st.sidebar:
     st.subheader("📈 Economic Context (BEA)")
     bea_api_key = st.text_input(
         "BEA API Key",
+        value=_env_bea_key,
         placeholder="Get free key at apps.bea.gov/api/signup",
         type="password",
-        help="Optional. Free registration at apps.bea.gov/api/signup.",
+        help="Optional. Free registration at apps.bea.gov/api/signup. Leave blank to use BEA_API_KEY from .env.",
     )
 
     connect_btn = st.button("🔌 Connect to HaloPSA", use_container_width=True)
 
     if connect_btn:
         if not halo_url or not client_id or not client_secret:
-            st.error("Please fill in all three fields.")
+            st.error(
+                "HaloPSA URL, Client ID, and Client Secret are required. "
+                "Enter them above or set HALO_HOST, CLIENT_ID, and CLIENT_SECRET in your .env file."
+            )
         else:
             with st.spinner("Connecting..."):
                 success, error = try_authenticate(halo_url, client_id, client_secret)
@@ -445,14 +466,17 @@ if generate_btn:
         st.warning("Start date must be before end date.")
     elif use_ai_recommendations and not anthropic_api_key:
         st.warning(
-            "Please enter your Anthropic API key, or toggle off AI Recommendations."
+            "An Anthropic API key is required for AI Recommendations. "
+            "Enter it in the sidebar or set ANTHROPIC_API_KEY in your .env file, "
+            "or toggle off AI Recommendations."
         )
     else:
         # Build manual recommendations list if AI is toggled off
         manual_recs = None
         if not use_ai_recommendations:
             manual_recs = [
-                st.session_state.get(f"manual_rec_{i}", "") for i in range(num_recs)
+                st.session_state.get(f"manual_rec_{i}", "")
+                for i in range(st.session_state.num_recs)
             ]
 
         pptx_bytes, filename = run_qbr_generation(
@@ -462,8 +486,8 @@ if generate_btn:
             msp_contact=msp_contact,
             use_ai=use_ai_recommendations,
             anthropic_key=anthropic_api_key,
-            num_recs=num_recs,
-            sample_size=sample_size,
+            num_recs=st.session_state.num_recs,
+            sample_size=st.session_state.sample_size,
             manual_recs=manual_recs,
             bea_api_key=bea_api_key,
             selected_industry_name=selected_industry_name,

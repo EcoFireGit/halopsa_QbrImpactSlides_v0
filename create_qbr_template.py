@@ -405,7 +405,7 @@ def main():
     add_chart_placeholder(prs)
     add_stability_slide(prs)
     add_responsiveness_slide(prs)  # Replaced SLA performance slide with this
-    add_recommendations(prs)
+    add_recommendations(prs, num_recommendations=10)
     add_thank_you(prs)
 
     # Save the presentation
