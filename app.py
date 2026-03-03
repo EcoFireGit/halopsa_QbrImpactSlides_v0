@@ -199,7 +199,13 @@ def run_qbr_generation(
         )
         return None, None
 
-    st.info(f"✅ Retrieved **{len(tickets)}** tickets.")
+    if use_ai and anthropic_key and len(tickets) > sample_size:
+        st.info(
+            f"✅ Retrieved **{len(tickets)}** tickets "
+            f"(**{sample_size}** will be sampled for AI analysis)."
+        )
+    else:
+        st.info(f"✅ Retrieved **{len(tickets)}** tickets.")
 
     # 2. Compute metrics
     metrics_data = calculate_metrics(tickets)
