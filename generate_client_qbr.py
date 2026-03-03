@@ -285,6 +285,75 @@ def _empty_metrics():
     }
 
 
+def calculate_health_score(metrics_data: dict) -> int:
+    """Compute a 0-100 Client Health Score from the calculate_metrics() dict."""
+
+    # 1. Proactive % (0-25 pts) — higher is better
+    try:
+        score_proactive = (
+            float(metrics_data.get("{{PROACTIVE_PERCENT}}", "0")) / 100.0
+        ) * 25.0
+    except (ValueError, TypeError):
+        score_proactive = 0.0
+
+    # 2. Same-day resolution rate (0-25 pts) — higher is better
+    try:
+        score_same_day = (
+            float(metrics_data.get("{{SAME_DAY_RATE}}", "0")) / 100.0
+        ) * 25.0
+    except (ValueError, TypeError):
+        score_same_day = 0.0
+
+    # 3. Critical resolution time (0-25 pts) — lower is better
+    # N/A or < 1 hour = 25; ≤4h = 25; 4–24h = linear; ≥24h = 0
+    crit_str = metrics_data.get("{{CRITICAL_RES_TIME}}", "N/A").strip()
+    if crit_str == "N/A" or crit_str.startswith("<"):
+        score_critical = 25.0
+    else:
+        try:
+            hours = float(crit_str.replace(" hours", "").replace(" hour", "").strip())
+            if hours <= 4.0:
+                score_critical = 25.0
+            elif hours >= 24.0:
+                score_critical = 0.0
+            else:
+                score_critical = 25.0 * (1.0 - (hours - 4.0) / 20.0)
+        except (ValueError, TypeError):
+            score_critical = 25.0
+
+    # 4. Avg first response (0-25 pts) — lower is better
+    # N/A = 12.5 (neutral); ≤30 min = 25; 30–240 min = linear; ≥240 min = 0
+    resp_str = metrics_data.get("{{AVG_FIRST_RESPONSE}}", "N/A").strip()
+    if resp_str == "N/A":
+        score_response = 12.5
+    else:
+        try:
+            if resp_str.endswith(" mins"):
+                resp_minutes = float(resp_str.replace(" mins", "").strip())
+            elif "hour" in resp_str:
+                resp_minutes = (
+                    float(resp_str.replace(" hours", "").replace(" hour", "").strip())
+                    * 60.0
+                )
+            else:
+                resp_minutes = None
+
+            if resp_minutes is None:
+                score_response = 12.5
+            elif resp_minutes <= 30.0:
+                score_response = 25.0
+            elif resp_minutes >= 240.0:
+                score_response = 0.0
+            else:
+                score_response = 25.0 * (1.0 - (resp_minutes - 30.0) / 210.0)
+        except (ValueError, TypeError):
+            score_response = 12.5
+
+    return int(
+        round(score_proactive + score_same_day + score_critical + score_response)
+    )
+
+
 # --- 2. TEMPLATE POPULATION ENGINE ---
 
 
