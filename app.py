@@ -16,7 +16,7 @@ from datetime import date, timedelta
 import streamlit as st
 from dotenv import load_dotenv
 
-from generate_client_qbr import calculate_metrics, generate_qbr
+from generate_client_qbr import calculate_metrics, calculate_health_score, generate_qbr
 from halo_client import HaloClient
 
 # Load .env from the current working directory (values are fallbacks if not
@@ -58,6 +58,8 @@ if "num_recs" not in st.session_state:
     st.session_state.num_recs = 3
 if "sample_size" not in st.session_state:
     st.session_state.sample_size = 100
+if "health_score" not in st.session_state:
+    st.session_state.health_score = None
 
 
 # ─────────────────────────────────────────────
@@ -151,6 +153,33 @@ def _render_bea_panel(insights: dict, industry_name: str):
     )
 
 
+def _render_health_score(score: int):
+    if score >= 80:
+        color, label = "#16a34a", "Excellent"
+    elif score >= 50:
+        color, label = "#ca8a04", "Needs Attention"
+    else:
+        color, label = "#dc2626", "At Risk"
+
+    st.markdown("### Client Health Score")
+    st.markdown(
+        f"""
+        <div style="display:inline-block;background-color:{color};color:white;
+                    font-size:3rem;font-weight:bold;padding:0.4rem 1.2rem;
+                    border-radius:8px;line-height:1.2;">
+            {score}
+        </div>
+        <span style="font-size:1.2rem;color:{color};font-weight:600;
+                     margin-left:0.75rem;vertical-align:middle;">
+            {label}
+        </span>""",
+        unsafe_allow_html=True,
+    )
+    st.caption(
+        "Score = avg of 4 KPIs: Proactive %, Same-Day Resolution, Critical Resolution Time, Avg First Response (25 pts each)"
+    )
+
+
 def run_qbr_generation(
     selected_client,
     start_date,
@@ -197,7 +226,7 @@ def run_qbr_generation(
         st.warning(
             f"⚠️ No tickets found for **{client_name}** in the selected date range."
         )
-        return None, None
+        return None, None, None
 
     if use_ai and anthropic_key and len(tickets) > sample_size:
         st.info(
@@ -209,6 +238,7 @@ def run_qbr_generation(
 
     # 2. Compute metrics
     metrics_data = calculate_metrics(tickets)
+    health_score = calculate_health_score(metrics_data)
 
     # 2.5 Fetch BEA economic context (optional)
     bea_replacements = build_empty_bea_replacements()
@@ -252,7 +282,7 @@ def run_qbr_generation(
 
             except Exception as e:
                 st.error(f"❌ Claude API error: {e}")
-                return None, None
+                return None, None, None
     else:
         # Use manual recommendations
         recommendations = [
@@ -277,7 +307,7 @@ def run_qbr_generation(
         template_path = "Master_QBR_Template.pptx"
         if not os.path.exists(template_path):
             st.error("❌ Master_QBR_Template.pptx not found.")
-            return None, None
+            return None, None, None
 
         with tempfile.NamedTemporaryFile(suffix=".pptx", delete=False) as tmp:
             output_path = tmp.name
@@ -296,7 +326,7 @@ def run_qbr_generation(
 
     safe_name = client_name.replace(" ", "_").replace("/", "-")
     filename = f"{safe_name}_QBR_{start_date.strftime('%Y%m%d')}.pptx"
-    return pptx_bytes, filename
+    return pptx_bytes, filename, health_score
 
 
 # ─────────────────────────────────────────────
@@ -485,7 +515,7 @@ if generate_btn:
                 for i in range(st.session_state.num_recs)
             ]
 
-        pptx_bytes, filename = run_qbr_generation(
+        pptx_bytes, filename, health_score = run_qbr_generation(
             selected_client=selected_client,
             start_date=start_date,
             end_date=end_date,
@@ -502,6 +532,7 @@ if generate_btn:
         if pptx_bytes:
             st.session_state.qbr_bytes = pptx_bytes
             st.session_state.qbr_filename = filename
+            st.session_state.health_score = health_score
             st.success(f"🎉 QBR generated successfully for **{selected_name}**!")
 
             if st.session_state.bea_insights:
@@ -509,6 +540,11 @@ if generate_btn:
                     st.session_state.bea_insights,
                     st.session_state.bea_industry_name,
                 )
+
+# ── Section 5: Health Score ──
+if st.session_state.get("health_score") is not None:
+    st.markdown("---")
+    _render_health_score(st.session_state.health_score)
 
 # ── Section 6: Download ──
 if st.session_state.qbr_bytes:
