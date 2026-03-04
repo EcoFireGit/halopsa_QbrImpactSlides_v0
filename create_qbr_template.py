@@ -15,7 +15,7 @@ from pptx.enum.text import PP_ALIGN
 from pptx.dml.color import RGBColor
 
 # Define color scheme
-BLUE = RGBColor(46, 92, 138)  # #2E5C8A
+BLUE = RGBColor(36, 46, 101)  # #242E65
 GRAY = RGBColor(74, 85, 104)  # #4A5568
 LIGHT_GRAY = RGBColor(226, 232, 240)
 

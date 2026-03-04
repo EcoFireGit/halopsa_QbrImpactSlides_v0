@@ -90,7 +90,7 @@ def generate_support_distribution_chart(proactive_pct, reactive_pct, output_path
         "Proactive vs. Reactive Support Distribution",
         fontsize=14,
         fontweight="bold",
-        color="#2E5C8A",
+        color="#242E65",
         pad=15,
     )
 
