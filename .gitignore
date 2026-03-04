@@ -211,3 +211,6 @@ __marimo__/
 !Master_QBR_Template.pptx
 
 CLAUDE.md
+
+# Client profile data (per-client employee count + hourly rate)
+client_profiles.json

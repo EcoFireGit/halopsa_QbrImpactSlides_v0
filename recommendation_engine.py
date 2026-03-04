@@ -16,6 +16,10 @@ def generate_recommendations(
     ticket_summaries: list[str],
     num_recommendations: int = 3,
     anthropic_api_key: str = None,
+    employee_count: int = 0,
+    avg_hourly_rate: float = 50.0,
+    business_impact: dict | None = None,
+    risk_flags: list[dict] | None = None,
 ) -> list[dict]:
     """
     Calls Claude to generate strategic QBR recommendations.
@@ -56,6 +60,9 @@ Your recommendations must:
 2. Be written in plain, executive-friendly language — no jargon.
 3. Each have a SHORT TITLE (5 words or fewer) and a 1-2 sentence RATIONALE.
 4. Be returned as a valid JSON array ONLY — no preamble, no explanation outside JSON.
+5. Each recommendation MUST: (a) name the specific risk it addresses with data evidence,
+   (b) state the cost of inaction in dollar or time terms,
+   (c) include ROI framing: what the client gains by acting.
 
 Output format:
 [
@@ -82,7 +89,28 @@ Output format:
         [f"{i + 1}. {s}" for i, s in enumerate(ticket_summaries) if s and s.strip()]
     )
 
-    user_prompt = f"""Please generate exactly {num_recommendations} strategic recommendations 
+    # Build optional client profile section
+    profile_section = ""
+    if employee_count > 0 and business_impact:
+        profile_section = f"""
+--- CLIENT PROFILE ---
+- Employee Count: {employee_count}
+- Average Loaded Hourly Rate: ${avg_hourly_rate}/hr
+- Productivity Hours Lost to Critical Incidents: {business_impact.get("productivity_hours_lost", 0):.1f}
+- Estimated Dollar Cost: ${business_impact.get("estimated_dollar_cost", 0):,.0f}
+- Risk Assessment: {business_impact.get("risk_statement", "N/A")}
+"""
+
+    # Build optional risk flags section
+    risk_section = ""
+    if risk_flags:
+        risk_lines = []
+        for rf in risk_flags:
+            sev = rf["severity"].upper()
+            risk_lines.append(f"- [{sev}] {rf['flag']}")
+        risk_section = "\n--- RISK FLAGS ---\n" + "\n".join(risk_lines) + "\n"
+
+    user_prompt = f"""Please generate exactly {num_recommendations} strategic recommendations
 for the following MSP client QBR.
 
 CLIENT: {client_name}
@@ -90,7 +118,7 @@ REVIEW PERIOD: {review_period}
 
 --- AGGREGATED METRICS ---
 {metrics_text}
-
+{profile_section}{risk_section}
 --- SAMPLE TICKET SUMMARIES ({len(ticket_summaries)} tickets sampled) ---
 {summaries_text}
 
