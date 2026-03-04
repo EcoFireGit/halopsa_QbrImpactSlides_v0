@@ -81,12 +81,37 @@ def add_executive_summary(prs):
         p.text = "• " + bullet_text
         p.font.size = Pt(22)
         p.font.color.rgb = GRAY
-        p.space_after = Pt(24)
+        p.space_after = Pt(14)
+
+    # Business Impact text box
+    impact_box = slide.shapes.add_textbox(
+        Inches(0.5), Inches(5.0), Inches(9), Inches(0.4)
+    )
+    impact_frame = impact_box.text_frame
+    impact_frame.word_wrap = True
+    impact_frame.text = (
+        "Business Impact: {{PRODUCTIVITY_HOURS_LOST}} productivity hours at risk"
+        " | Est. cost: {{ESTIMATED_COST}}"
+    )
+    impact_frame.paragraphs[0].font.size = Pt(13)
+    impact_frame.paragraphs[0].font.bold = True
+    impact_frame.paragraphs[0].font.color.rgb = RGBColor(220, 38, 38)  # Red
+
+    # Risk statement box
+    risk_box = slide.shapes.add_textbox(
+        Inches(0.5), Inches(5.6), Inches(9), Inches(0.5)
+    )
+    risk_frame = risk_box.text_frame
+    risk_frame.word_wrap = True
+    risk_frame.text = "{{RISK_STATEMENT}}"
+    risk_frame.paragraphs[0].font.size = Pt(12)
+    risk_frame.paragraphs[0].font.italic = True
+    risk_frame.paragraphs[0].font.color.rgb = GRAY
 
     # BEA economic context box — light-blue background with BLUE border
     LIGHT_BLUE = RGBColor(219, 234, 254)  # #DBEAFE
     bea_box = slide.shapes.add_shape(
-        1, Inches(0.5), Inches(6.0), Inches(9), Inches(1.2)
+        1, Inches(0.5), Inches(6.4), Inches(9), Inches(1.2)
     )
     bea_box.fill.solid()
     bea_box.fill.fore_color.rgb = LIGHT_BLUE
@@ -94,7 +119,7 @@ def add_executive_summary(prs):
 
     # Line 1: Industry and GDP value
     line1_box = slide.shapes.add_textbox(
-        Inches(0.65), Inches(6.05), Inches(8.7), Inches(0.45)
+        Inches(0.65), Inches(6.45), Inches(8.7), Inches(0.45)
     )
     line1_frame = line1_box.text_frame
     line1_frame.word_wrap = True
@@ -108,7 +133,7 @@ def add_executive_summary(prs):
 
     # Line 2: Growth rates and trend label
     line2_box = slide.shapes.add_textbox(
-        Inches(0.65), Inches(6.55), Inches(8.7), Inches(0.5)
+        Inches(0.65), Inches(6.95), Inches(8.7), Inches(0.5)
     )
     line2_frame = line2_box.text_frame
     line2_frame.word_wrap = True
@@ -313,10 +338,32 @@ def add_recommendations(prs, num_recommendations=3):
     title_frame.paragraphs[0].font.bold = True
     title_frame.paragraphs[0].font.color.rgb = BLUE
 
+    # Risk Spotlight section
+    RED = RGBColor(220, 38, 38)
+    risk_header = slide.shapes.add_textbox(
+        Inches(0.5), Inches(1.0), Inches(9), Inches(0.3)
+    )
+    rh_frame = risk_header.text_frame
+    rh_frame.text = "Risk Spotlight:"
+    rh_frame.paragraphs[0].font.size = Pt(12)
+    rh_frame.paragraphs[0].font.bold = True
+    rh_frame.paragraphs[0].font.color.rgb = RED
+
+    risk_text_box = slide.shapes.add_textbox(
+        Inches(0.5), Inches(1.35), Inches(9), Inches(0.75)
+    )
+    rt_frame = risk_text_box.text_frame
+    rt_frame.word_wrap = True
+    for i in range(3):
+        p = rt_frame.paragraphs[0] if i == 0 else rt_frame.add_paragraph()
+        p.text = f"{{{{TOP_RISK_{i + 1}}}}}"
+        p.font.size = Pt(11)
+        p.font.color.rgb = GRAY
+
     # Dynamic vertical spacing based on number of recommendations
-    usable_height = 6.0  # inches available below title
+    usable_height = 5.0  # inches available below risk spotlight
     slot_height = min(usable_height / num_recommendations, 1.0)
-    y_start = 1.2
+    y_start = 2.2
 
     for i in range(num_recommendations):
         y_pos = y_start + (i * slot_height)
@@ -433,6 +480,12 @@ def main():
         "{{BEA_QOQ_GROWTH}}",
         "{{BEA_YOY_GROWTH}}",
         "{{BEA_TREND_LABEL}}",
+        "{{PRODUCTIVITY_HOURS_LOST}}",
+        "{{ESTIMATED_COST}}",
+        "{{RISK_STATEMENT}}",
+        "{{TOP_RISK_1}}",
+        "{{TOP_RISK_2}}",
+        "{{TOP_RISK_3}}",
     ]
     for p in placeholders:
         print(f"   • {p}")

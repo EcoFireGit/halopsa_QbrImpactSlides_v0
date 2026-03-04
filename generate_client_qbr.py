@@ -545,20 +545,49 @@ if __name__ == "__main__":
         },
     ]
 
+    # Compute business impact and risk flags from mock data
+    from business_impact import (
+        calculate_business_impact,
+        format_impact_replacements,
+    )
+    from risk_analyzer import analyze_risks, format_risk_replacements
+    from bea_insights import build_empty_bea_replacements
+
+    mock_metrics = calculate_metrics(mock_tickets)
+    impact = calculate_business_impact(mock_metrics, mock_tickets, 100, 65.0)
+    risk_flags = analyze_risks(mock_tickets)
+
+    mock_recs = [
+        {
+            "title": "Upgrade Legacy Workstations",
+            "rationale": "Slow application performance causing productivity loss.",
+        },
+        {
+            "title": "Security Awareness Training",
+            "rationale": "Reduce phishing-related incidents for General Users.",
+        },
+        {
+            "title": "Backup Redundancy Review",
+            "rationale": "Critical servers need additional backup coverage.",
+        },
+    ]
+    rec_replacements = build_recommendation_replacements(mock_recs)
+
     # Contextual data to fill the rest of the presentation
     context_data = {
         "{{CLIENT_NAME}}": "Acme Corporation",
         "{{REVIEW_PERIOD}}": "Q1 2026",
         "{{CHART_PLACEHOLDER}}": "[Chart Graphic Will Go Here]",
-        "{{RECOMMENDATION_1}}": "Upgrade legacy workstations causing slow application performance.",
-        "{{RECOMMENDATION_2}}": "Implement security awareness training for General Users.",
-        "{{RECOMMENDATION_3}}": "Review backup redundancy for critical servers.",
         "{{MSP_CONTACT_INFO}}": "Jane Doe | jdoe@yourmsp.com | (555) 123-4567",
+        **rec_replacements,
+        **build_empty_bea_replacements(),
+        **format_impact_replacements(impact),
+        **format_risk_replacements(risk_flags),
     }
 
     # Run the generator
     generate_qbr(
-        template_path="Master_QBR_Template_v2.pptx",
+        template_path="Master_QBR_Template.pptx",
         output_path="Acme_Corp_Q1_2026_QBR.pptx",
         contextual_data=context_data,
         ticket_data=mock_tickets,

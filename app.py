@@ -18,6 +18,7 @@ from dotenv import load_dotenv
 
 from generate_client_qbr import calculate_metrics, calculate_health_score, generate_qbr
 from halo_client import HaloClient
+from client_profiles import get_profile, upsert_profile
 
 # Load .env from the current working directory (values are fallbacks if not
 # entered by the user in the sidebar).
@@ -96,6 +97,10 @@ _defaults = {
     "sample_size": 100,
     "health_score": None,
     "metrics_display": None,
+    "business_impact": None,
+    "risk_flags": None,
+    "client_employee_count": 0,
+    "client_avg_hourly_rate": 50.0,
     # Settings dialog values (pre-filled from .env)
     "halo_url": _env_halo_url,
     "client_id_val": _env_client_id,
@@ -222,6 +227,67 @@ def _render_health_score(score: int):
     )
 
 
+def _render_business_impact(impact: dict):
+    """Render business impact metrics: critical tickets, hours, cost + risk statement."""
+    st.subheader("Business Impact")
+
+    if not impact.get("has_data"):
+        st.info(
+            "Enter employee count and hourly rate in the Client Profile section "
+            "to see business impact estimates."
+        )
+        return
+
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        st.metric("Critical Tickets", impact["critical_ticket_count"])
+    with col2:
+        st.metric(
+            "Productivity Hours at Risk",
+            f"{impact['productivity_hours_lost']:,.1f}",
+        )
+    with col3:
+        st.metric(
+            "Estimated Cost",
+            f"${impact['estimated_dollar_cost']:,.0f}",
+        )
+
+    st.markdown(f"> {impact['risk_statement']}")
+    st.caption(
+        "Assumes 10% of workforce affected per critical incident. "
+        "Cost = hours lost x loaded hourly rate."
+    )
+
+
+def _render_risk_flags(risk_flags: list[dict]):
+    """Render color-coded risk flag cards."""
+    if not risk_flags:
+        return
+
+    st.subheader("Risk Flags")
+
+    severity_colors = {
+        "high": ("#dc2626", "#fef2f2"),
+        "medium": ("#ea580c", "#fff7ed"),
+        "low": ("#ca8a04", "#fefce8"),
+    }
+
+    for rf in risk_flags:
+        text_color, bg_color = severity_colors.get(
+            rf["severity"], ("#4a5568", "#f7fafc")
+        )
+        sev_label = rf["severity"].upper()
+        st.markdown(
+            f'<div style="background-color:{bg_color};border-left:4px solid {text_color};'
+            f'padding:0.5rem 0.75rem;margin-bottom:0.5rem;border-radius:4px;">'
+            f'<span style="color:{text_color};font-weight:bold;font-size:0.75rem;">'
+            f"[{sev_label}]</span> "
+            f'<span style="color:#1a1a2e;font-size:0.9rem;">{rf["flag"]}</span>'
+            f"</div>",
+            unsafe_allow_html=True,
+        )
+
+
 def _render_results_dashboard():
     """Render the dashboard-style results view after QBR generation."""
     st.markdown("---")
@@ -269,6 +335,16 @@ def _render_results_dashboard():
             "Critical Resolution Time, Avg First Response (25 pts each)"
         )
 
+    # Business Impact card
+    if st.session_state.get("business_impact"):
+        st.markdown("---")
+        _render_business_impact(st.session_state.business_impact)
+
+    # Risk Flags
+    if st.session_state.get("risk_flags"):
+        st.markdown("---")
+        _render_risk_flags(st.session_state.risk_flags)
+
     # BEA panel
     if st.session_state.bea_insights:
         st.markdown("---")
@@ -290,6 +366,8 @@ def run_qbr_generation(
     manual_recs=None,
     bea_api_key=None,
     selected_industry_name=None,
+    employee_count=0,
+    avg_hourly_rate=50.0,
 ):
     from recommendation_engine import generate_recommendations
     from generate_client_qbr import (
@@ -301,6 +379,15 @@ def run_qbr_generation(
         calculate_sector_growth,
         format_bea_replacements,
         build_empty_bea_replacements,
+    )
+    from business_impact import (
+        calculate_business_impact,
+        format_impact_replacements,
+        build_empty_impact_replacements,
+    )
+    from risk_analyzer import (
+        analyze_risks,
+        format_risk_replacements,
     )
 
     client = st.session_state.halo_client
@@ -361,6 +448,20 @@ def run_qbr_generation(
                     f"BEA data unavailable: {e}. QBR proceeds without economic context."
                 )
 
+    # 2c. Calculate business impact
+    impact_replacements = build_empty_impact_replacements()
+    impact = calculate_business_impact(
+        metrics_data, tickets, employee_count, avg_hourly_rate
+    )
+    st.session_state.business_impact = impact
+    if impact["has_data"]:
+        impact_replacements = format_impact_replacements(impact)
+
+    # 2d. Analyze risks
+    risk_flags = analyze_risks(tickets)
+    st.session_state.risk_flags = risk_flags
+    risk_replacements = format_risk_replacements(risk_flags)
+
     # 3. Generate recommendations
     if use_ai and anthropic_key:
         with st.spinner(f"Asking Claude to generate {num_recs} recommendations..."):
@@ -375,6 +476,10 @@ def run_qbr_generation(
                     ticket_summaries=summaries,
                     num_recommendations=num_recs,
                     anthropic_api_key=anthropic_key,
+                    employee_count=employee_count,
+                    avg_hourly_rate=avg_hourly_rate,
+                    business_impact=impact,
+                    risk_flags=risk_flags,
                 )
                 st.success(f"Claude generated {len(recommendations)} recommendations.")
 
@@ -397,6 +502,8 @@ def run_qbr_generation(
         "{{MSP_CONTACT_INFO}}": msp_contact,
         **rec_replacements,
         **bea_replacements,
+        **impact_replacements,
+        **risk_replacements,
     }
 
     # 5. Generate PPTX
@@ -607,6 +714,33 @@ with st.expander("1. Client & Date Range", expanded=True):
             st.warning("Please select both a start and end date.")
             st.stop()
 
+# ── Section 1b: Client Profile ──
+with st.expander("1b. Client Profile", expanded=True):
+    profile = get_profile(selected_client["id"])
+    col1, col2 = st.columns(2)
+    with col1:
+        emp_count = st.number_input(
+            "Employee Count",
+            min_value=0,
+            value=profile["employee_count"],
+            step=1,
+            key=f"emp_count_{selected_client['id']}",
+            help="Number of employees at this client. Used for business impact calculations.",
+        )
+    with col2:
+        hourly_rate = st.number_input(
+            "Avg Loaded Hourly Rate ($)",
+            min_value=0.0,
+            value=float(profile["avg_hourly_rate"]),
+            step=5.0,
+            key=f"hourly_rate_{selected_client['id']}",
+            help="Average loaded cost per employee hour. Used to estimate dollar impact.",
+        )
+    # Persist on every render (Streamlit reruns on widget change)
+    upsert_profile(selected_client["id"], emp_count, hourly_rate)
+    st.session_state.client_employee_count = emp_count
+    st.session_state.client_avg_hourly_rate = hourly_rate
+
 # ── Section 2: Economic Context ──
 with st.expander("2. Economic Context (Optional)", expanded=True):
     if st.session_state.bea_key:
@@ -678,6 +812,8 @@ with st.expander("4. Generate QBR", expanded=True):
                 manual_recs=manual_recs,
                 bea_api_key=st.session_state.bea_key,
                 selected_industry_name=selected_industry_name,
+                employee_count=st.session_state.client_employee_count,
+                avg_hourly_rate=st.session_state.client_avg_hourly_rate,
             )
 
             if pptx_bytes:
