@@ -9,6 +9,8 @@ Usage:
     python create_qbr_template.py
 """
 
+import math
+
 from pptx import Presentation
 from pptx.util import Inches, Pt
 from pptx.enum.text import PP_ALIGN
@@ -51,12 +53,26 @@ def add_title_slide(prs):
     period_frame.paragraphs[0].alignment = PP_ALIGN.CENTER
 
 
+def _estimate_text_height_in(text, font_pt, box_width_in, space_after_pt=0):
+    """Estimate rendered height of a single text paragraph in inches.
+
+    Uses average character width ≈ 0.55× font size (typical sans-serif).
+    Errs slightly high (conservative), which prevents overlap.
+    """
+    chars_per_line = max(1, (box_width_in * 72) / (font_pt * 0.55))
+    num_lines = max(1, math.ceil(len(text) / chars_per_line))
+    line_height_pt = font_pt * 1.2  # standard line height multiplier
+    return (num_lines * line_height_pt + space_after_pt) / 72
+
+
 def add_executive_summary(prs):
     slide = prs.slides.add_slide(prs.slide_layouts[6])
 
-    # Title
+    # --- Title ---
+    TITLE_TOP = Inches(0.5)
+    TITLE_HEIGHT = Inches(0.8)
     title_box = slide.shapes.add_textbox(
-        Inches(0.5), Inches(0.5), Inches(9), Inches(0.8)
+        Inches(0.5), TITLE_TOP, Inches(9), TITLE_HEIGHT
     )
     title_frame = title_box.text_frame
     title_frame.text = "Executive Summary"
@@ -64,10 +80,11 @@ def add_executive_summary(prs):
     title_frame.paragraphs[0].font.bold = True
     title_frame.paragraphs[0].font.color.rgb = BLUE
 
-    # Content bullets focused on Business Impact
-    content_box = slide.shapes.add_textbox(Inches(1), Inches(2), Inches(8), Inches(4))
-    tf = content_box.text_frame
-    tf.word_wrap = True
+    # --- Bullets ---
+    BULLET_FONT_PT = 22
+    BULLET_WIDTH_IN = 8
+    SPACE_AFTER_PT = 14
+    BULLETS_TOP = TITLE_TOP + TITLE_HEIGHT + Inches(0.2)
 
     bullets = [
         "{{SAME_DAY_RATE}}% of your team's IT issues were completely resolved on the same day.",
@@ -76,16 +93,32 @@ def add_executive_summary(prs):
         "We managed {{TICKET_COUNT}} total IT events this quarter to keep your business running.",
     ]
 
+    bullets_height_in = sum(
+        _estimate_text_height_in(
+            "• " + b, BULLET_FONT_PT, BULLET_WIDTH_IN, SPACE_AFTER_PT
+        )
+        for b in bullets
+    )
+    bullets_height_in = min(max(bullets_height_in, 2.5), 3.5)  # floor 2.5", cap 3.5"
+
+    content_box = slide.shapes.add_textbox(
+        Inches(1), BULLETS_TOP, Inches(BULLET_WIDTH_IN), Inches(bullets_height_in)
+    )
+    tf = content_box.text_frame
+    tf.word_wrap = True
+
     for i, bullet_text in enumerate(bullets):
         p = tf.paragraphs[0] if i == 0 else tf.add_paragraph()
         p.text = "• " + bullet_text
-        p.font.size = Pt(22)
+        p.font.size = Pt(BULLET_FONT_PT)
         p.font.color.rgb = GRAY
-        p.space_after = Pt(14)
+        p.space_after = Pt(SPACE_AFTER_PT)
 
-    # Business Impact text box
+    # --- Business Impact --- positioned below bullets
+    IMPACT_TOP = BULLETS_TOP + Inches(bullets_height_in) + Inches(0.15)
+    IMPACT_HEIGHT = Inches(0.4)
     impact_box = slide.shapes.add_textbox(
-        Inches(0.5), Inches(5.0), Inches(9), Inches(0.4)
+        Inches(0.5), IMPACT_TOP, Inches(9), IMPACT_HEIGHT
     )
     impact_frame = impact_box.text_frame
     impact_frame.word_wrap = True
@@ -97,10 +130,10 @@ def add_executive_summary(prs):
     impact_frame.paragraphs[0].font.bold = True
     impact_frame.paragraphs[0].font.color.rgb = RGBColor(220, 38, 38)  # Red
 
-    # Risk statement box
-    risk_box = slide.shapes.add_textbox(
-        Inches(0.5), Inches(5.6), Inches(9), Inches(0.5)
-    )
+    # --- Risk Statement --- positioned below Business Impact
+    RISK_TOP = IMPACT_TOP + IMPACT_HEIGHT + Inches(0.1)
+    RISK_HEIGHT = Inches(0.5)
+    risk_box = slide.shapes.add_textbox(Inches(0.5), RISK_TOP, Inches(9), RISK_HEIGHT)
     risk_frame = risk_box.text_frame
     risk_frame.word_wrap = True
     risk_frame.text = "{{RISK_STATEMENT}}"
@@ -108,18 +141,17 @@ def add_executive_summary(prs):
     risk_frame.paragraphs[0].font.italic = True
     risk_frame.paragraphs[0].font.color.rgb = GRAY
 
-    # BEA economic context box — light-blue background with BLUE border
+    # --- BEA box --- anchored below risk statement, never overlaps
+    BEA_TOP = max(RISK_TOP + RISK_HEIGHT + Inches(0.15), Inches(6.3))
     LIGHT_BLUE = RGBColor(219, 234, 254)  # #DBEAFE
-    bea_box = slide.shapes.add_shape(
-        1, Inches(0.5), Inches(6.4), Inches(9), Inches(1.2)
-    )
+    bea_box = slide.shapes.add_shape(1, Inches(0.5), BEA_TOP, Inches(9), Inches(1.2))
     bea_box.fill.solid()
     bea_box.fill.fore_color.rgb = LIGHT_BLUE
     bea_box.line.color.rgb = BLUE
 
     # Line 1: Industry and GDP value
     line1_box = slide.shapes.add_textbox(
-        Inches(0.65), Inches(6.45), Inches(8.7), Inches(0.45)
+        Inches(0.65), BEA_TOP + Inches(0.05), Inches(8.7), Inches(0.45)
     )
     line1_frame = line1_box.text_frame
     line1_frame.word_wrap = True
@@ -133,7 +165,7 @@ def add_executive_summary(prs):
 
     # Line 2: Growth rates and trend label
     line2_box = slide.shapes.add_textbox(
-        Inches(0.65), Inches(6.95), Inches(8.7), Inches(0.5)
+        Inches(0.65), BEA_TOP + Inches(0.55), Inches(8.7), Inches(0.5)
     )
     line2_frame = line2_box.text_frame
     line2_frame.word_wrap = True
@@ -219,16 +251,8 @@ def add_chart_placeholder(prs):
     subtitle_frame.paragraphs[0].font.size = Pt(20)
     subtitle_frame.paragraphs[0].font.color.rgb = GRAY
 
-    # Chart placeholder box
-    placeholder = slide.shapes.add_shape(
-        1, Inches(2), Inches(2.5), Inches(6), Inches(4)
-    )
-    placeholder.fill.solid()
-    placeholder.fill.fore_color.rgb = RGBColor(240, 240, 240)
-    placeholder.line.color.rgb = GRAY
-
     # Placeholder text
-    text_box = slide.shapes.add_textbox(Inches(2), Inches(4), Inches(6), Inches(1))
+    text_box = slide.shapes.add_textbox(Inches(0.5), Inches(2), Inches(9), Inches(1))
     text_frame = text_box.text_frame
     text_frame.text = "{{CHART_PLACEHOLDER}}"
     text_frame.paragraphs[0].font.size = Pt(24)
@@ -372,12 +396,14 @@ def add_recommendations(prs, num_recommendations=3):
         circle = slide.shapes.add_shape(
             1, Inches(0.5), Inches(y_pos), Inches(0.4), Inches(0.4)
         )
+        circle.name = f"rec_{i + 1}_circle"
         circle.fill.solid()
         circle.fill.fore_color.rgb = BLUE
 
         num_text = slide.shapes.add_textbox(
             Inches(0.5), Inches(y_pos), Inches(0.4), Inches(0.4)
         )
+        num_text.name = f"rec_{i + 1}_num"
         num_frame = num_text.text_frame
         num_frame.text = str(i + 1)
         num_frame.paragraphs[0].font.size = Pt(16)
@@ -389,6 +415,7 @@ def add_recommendations(prs, num_recommendations=3):
         title_ph = slide.shapes.add_textbox(
             Inches(1.1), Inches(y_pos), Inches(8.3), Inches(slot_height * 0.4)
         )
+        title_ph.name = f"rec_{i + 1}_title"
         tf = title_ph.text_frame
         tf.text = f"{{{{REC_{i + 1}_TITLE}}}}"
         tf.paragraphs[0].font.size = Pt(14)
@@ -402,6 +429,7 @@ def add_recommendations(prs, num_recommendations=3):
             Inches(8.3),
             Inches(slot_height * 0.5),
         )
+        rat_ph.name = f"rec_{i + 1}_rationale"
         rf = rat_ph.text_frame
         rf.word_wrap = True
         rf.text = f"{{{{REC_{i + 1}_RATIONALE}}}}"

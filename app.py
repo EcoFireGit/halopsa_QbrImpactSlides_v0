@@ -464,7 +464,7 @@ def run_qbr_generation(
 
     # 3. Generate recommendations
     if use_ai and anthropic_key:
-        with st.spinner(f"Asking Claude to generate {num_recs} recommendations..."):
+        with st.spinner(f"AI is generating {num_recs} recommendations..."):
             sampled = tickets[:sample_size]
             summaries = [t.get("summary", "") for t in sampled if t.get("summary")]
 
@@ -481,7 +481,7 @@ def run_qbr_generation(
                     business_impact=impact,
                     risk_flags=risk_flags,
                 )
-                st.success(f"Claude generated {len(recommendations)} recommendations.")
+                st.success(f"AI generated {len(recommendations)} recommendations.")
 
             except Exception as e:
                 st.error(f"Claude API error: {e}")

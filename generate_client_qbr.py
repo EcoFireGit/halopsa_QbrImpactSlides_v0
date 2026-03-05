@@ -9,8 +9,10 @@ Usage:
     python generate_client_qbr.py
 """
 
+import math
 from datetime import datetime
 from pptx import Presentation
+from pptx.util import Inches
 import os
 
 import matplotlib.pyplot as plt
@@ -113,7 +115,7 @@ def generate_support_distribution_chart(proactive_pct, reactive_pct, output_path
     ax.legend(
         handles=[proactive_patch, reactive_patch],
         loc="lower center",
-        bbox_to_anchor=(0.5, -0.45),
+        bbox_to_anchor=(0.5, -0.40),
         ncol=2,
         fontsize=11,
         frameon=False,
@@ -403,6 +405,67 @@ def _remove_unused_rec_slots(slide, num_recs):
         sp_tree.remove(shape._element)
 
 
+def _estimate_text_height_in(text, font_pt, box_width_in, space_after_pt=0):
+    """Estimate rendered paragraph height in inches (conservative/slightly high)."""
+    chars_per_line = max(1, (box_width_in * 72) / (font_pt * 0.55))
+    num_lines = max(1, math.ceil(len(text) / chars_per_line))
+    return (num_lines * font_pt * 1.2 + space_after_pt) / 72
+
+
+def _reposition_rec_slots(slide, num_recs):
+    """Reposition recommendation shapes vertically based on actual post-replacement text height."""
+    Y_START = Inches(2.2)
+    TITLE_FONT_PT = 14
+    RAT_FONT_PT = 11
+    BOX_WIDTH_IN = 8.3
+    GAP_INNER = Inches(0.05)
+    GAP_SLOT = Inches(0.2)
+
+    slot_shapes = {}
+    for shape in slide.shapes:
+        name = getattr(shape, "name", "") or ""
+        for i in range(1, num_recs + 1):
+            if name == f"rec_{i}_title":
+                slot_shapes.setdefault(i, {})["title"] = shape
+            elif name == f"rec_{i}_rationale":
+                slot_shapes.setdefault(i, {})["rationale"] = shape
+            elif name in (f"rec_{i}_circle", f"rec_{i}_num"):
+                slot_shapes.setdefault(i, {}).setdefault("decorators", []).append(shape)
+
+    if not slot_shapes:
+        return  # Template predates named shapes — skip gracefully
+
+    y_pos = Y_START
+    for i in range(1, num_recs + 1):
+        slot = slot_shapes.get(i)
+        if not slot:
+            continue
+
+        title_shape = slot.get("title")
+        title_text = title_shape.text_frame.text if title_shape else ""
+        title_h = max(
+            _estimate_text_height_in(title_text, TITLE_FONT_PT, BOX_WIDTH_IN), 0.3
+        )
+
+        rat_shape = slot.get("rationale")
+        rat_text = rat_shape.text_frame.text if rat_shape else ""
+        rat_h = max(_estimate_text_height_in(rat_text, RAT_FONT_PT, BOX_WIDTH_IN), 0.3)
+
+        for dec in slot.get("decorators", []):
+            dec.top = y_pos
+
+        if title_shape:
+            title_shape.top = y_pos
+            title_shape.height = Inches(title_h)
+
+        rat_top = y_pos + Inches(title_h) + GAP_INNER
+        if rat_shape:
+            rat_shape.top = rat_top
+            rat_shape.height = Inches(rat_h)
+
+        y_pos = rat_top + Inches(rat_h) + GAP_SLOT
+
+
 def generate_qbr(template_path, output_path, contextual_data, ticket_data, num_recs=10):
     """
     Loads the template, computes metrics, inserts the chart image,
@@ -451,15 +514,12 @@ def generate_qbr(template_path, output_path, contextual_data, ticket_data, num_r
                             left = shape.left
                             top = shape.top
                             width = shape.width
-                            height = shape.height
 
                             # Clear the placeholder text
                             run.text = ""
 
                             # Insert the chart image in the same position
-                            slide.shapes.add_picture(
-                                chart_path, left, top, width, height
-                            )
+                            slide.shapes.add_picture(chart_path, left, top, width=width)
                             chart_inserted = True
                             print(
                                 f"✅ Chart inserted on slide: '{slide.shapes.title.text if slide.shapes.title else 'Untitled'}'"
@@ -469,11 +529,15 @@ def generate_qbr(template_path, output_path, contextual_data, ticket_data, num_r
             # --- Replace all other text placeholders ---
             replace_text_in_shape(shape, final_replacements)
 
-    # 5. Save the final PPTX
+    # 5. Reposition recommendation slots based on actual content heights
+    for slide in prs.slides:
+        _reposition_rec_slots(slide, num_recs)
+
+    # 6. Save the final PPTX
     prs.save(output_path)
     print(f"✅ QBR saved to: {output_path}")
 
-    # 6. Clean up the temp chart file
+    # 7. Clean up the temp chart file
     if os.path.exists(chart_path):
         os.remove(chart_path)
         print("🧹 Temp chart file cleaned up.")
