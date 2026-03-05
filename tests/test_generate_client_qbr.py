@@ -13,6 +13,7 @@ from generate_client_qbr import (
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _ticket(
     tickettype_id=1,
     priority_id=3,
@@ -179,9 +180,9 @@ class TestCalculateHealthScore:
             "{{CRITICAL_RES_TIME}}": "24.0 hours",
             "{{AVG_FIRST_RESPONSE}}": "N/A",
         }
-        # proactive=0, same_day=0, critical=0, response=12.5 → 12 or 13
+        # proactive=0, same_day=0, critical=0, response=12.5 → 12 (banker's rounding)
         score = calculate_health_score(metrics)
-        assert score == 13  # int(round(12.5))
+        assert score == 12
 
     def test_na_critical_time_gives_full_25(self):
         metrics = {
@@ -212,7 +213,7 @@ class TestCalculateHealthScore:
             "{{AVG_FIRST_RESPONSE}}": "300 mins",
         }
         score = calculate_health_score(metrics)
-        assert score == 13  # int(round(12.5))
+        assert score == 12  # round(12.5) = 12 in Python 3 (banker's rounding)
 
     def test_response_at_30_min_boundary(self):
         metrics = {
