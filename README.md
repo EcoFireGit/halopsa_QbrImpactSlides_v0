@@ -55,4 +55,23 @@ The pipeline flows: **HaloPSA API → Metrics Calculation → LLM Recommendation
 - **Ticket sampling status message**: When AI is enabled and ticket count exceeds `sample_size`, the status message clarifies how many will be sampled: "Retrieved N tickets (M will be sampled for AI analysis)."
 - **BEA industry selectbox state**: Persisted per-client in Streamlit session state using key `bea_industry_{client_id}` to prevent resets on rerun.
 - **Pre-commit hook**: `.pre-commit-config.yaml` uses `ruff` (v0.3.0) for linting (`--fix`) and formatting. Run `pre-commit install` after cloning.
-- **No test suite exists** — the project uses `main.py` and `generate_client_qbr.py`'s `__main__` block for manual testing with mock data.
+
+## Testing
+
+```bash
+# Run the full unit test suite (135 tests)
+python -m pytest tests/ -v
+```
+
+The `tests/` directory contains unit tests for all core business logic modules:
+
+| File | Module tested |
+|---|---|
+| `test_generate_client_qbr.py` | `calculate_metrics`, `calculate_health_score`, `build_recommendation_replacements` |
+| `test_business_impact.py` | `business_impact.py` |
+| `test_risk_analyzer.py` | `risk_analyzer.py` |
+| `test_bea_insights.py` | `bea_insights.py` |
+| `test_client_profiles.py` | `client_profiles.py` |
+| `test_recommendation_engine.py` | `recommendation_engine.py` (prompt construction) |
+
+Note: `calculate_health_score()` uses Python 3 banker's rounding (`round()` rounds half-to-even), so `round(12.5)` returns `12`, not `13`.
