@@ -65,7 +65,7 @@ The pipeline flows: **HaloPSA API → Metrics Calculation → LLM Recommendation
 - **Client profile persistence**: Per-client employee count and avg hourly rate are stored in `client_profiles.json` (gitignored, in project root). Default fallback: `employee_count=0`, `avg_hourly_rate=50`. When `employee_count=0`, `has_data=False` and impact cards are not shown in the dashboard.
 - **Business impact formula**: `employees_affected = employee_count × 0.1`; `productivity_hours_lost = critical_ticket_count × avg_critical_res_hours × employees_affected`; `estimated_dollar_cost = productivity_hours_lost × avg_hourly_rate`. Risk statement: "High risk" if critical_count > 3 and proactive_pct < 40; "Moderate risk" if critical_count > 0; else "Low risk".
 - **Risk flag ordering**: `analyze_risks()` outputs flags in order: open critical tickets → critical volume → recurring keywords. Max 5 total; only top 3 are mapped to PPTX placeholders.
-- **Test suite**: `tests/` contains 135 unit tests covering all core business logic modules (`generate_client_qbr`, `business_impact`, `risk_analyzer`, `bea_insights`, `client_profiles`, `recommendation_engine`). Run with `python -m pytest tests/ -v`. Note: `calculate_health_score()` uses Python 3 banker's rounding — `round(12.5)` returns `12`, not `13`.
+- **Test suite**: `tests/` contains 304 unit tests covering all core business logic modules (`generate_client_qbr`, `business_impact`, `risk_analyzer`, `bea_insights`, `client_profiles`, `recommendation_engine`, `chat_engine`, `chat_preferences`). Run with `python -m pytest tests/ -v`. Note: `calculate_health_score()` uses Python 3 banker's rounding — `round(12.5)` returns `12`, not `13`.
 
 ## Interaction + Visual Verification Loop
 

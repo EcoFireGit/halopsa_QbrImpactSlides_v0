@@ -63,7 +63,7 @@ The pipeline flows: **HaloPSA API → Metrics Calculation → LLM Recommendation
 ## Testing
 
 ```bash
-# Run the full unit test suite (135 tests)
+# Run the full unit test suite (304 tests)
 python -m pytest tests/ -v
 ```
 
@@ -77,5 +77,7 @@ The `tests/` directory contains unit tests for all core business logic modules:
 | `test_bea_insights.py` | `bea_insights.py` |
 | `test_client_profiles.py` | `client_profiles.py` |
 | `test_recommendation_engine.py` | `recommendation_engine.py` (prompt construction) |
+| `test_chat_engine.py` | `chat_engine.py` (intent parsing, date parsing, client resolution, follow-up prompts) |
+| `test_chat_preferences.py` | `chat_preferences.py` (AI settings, client industry, MSP contact persistence) |
 
 Note: `calculate_health_score()` uses Python 3 banker's rounding (`round()` rounds half-to-even), so `round(12.5)` returns `12`, not `13`.
