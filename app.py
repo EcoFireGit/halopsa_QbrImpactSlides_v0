@@ -61,55 +61,232 @@ st.set_page_config(page_title="MSP QBR Generator", layout="wide")
 # ─────────────────────────────────────────────
 # CUSTOM CSS
 # ─────────────────────────────────────────────
+# Load Inter font
+st.markdown(
+    '<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">',
+    unsafe_allow_html=True,
+)
+
 st.markdown(
     """
     <style>
+    /* ── Font ── */
+    [data-testid="stApp"] {
+        font-family: 'Inter', sans-serif;
+    }
+
     /* Hide sidebar */
     [data-testid="stSidebar"] { display: none; }
     section[data-testid="stSidebarNav"] { display: none; }
 
-    /* Brand headers */
-    h1, h2, h3 { color: #242E65 !important; }
-
-    /* Orange accent dividers */
-    hr { border-color: #F05523 !important; }
-
-    /* Metric cards */
-    [data-testid="stMetric"] {
-        background-color: #F0F1F8;
-        border-left: 4px solid #F05523;
-        padding: 0.75rem 1rem;
-        border-radius: 6px;
+    /* ── Reduce dead space ── */
+    [data-testid="stMainBlockContainer"] {
+        padding-top: 1rem !important;
+        max-width: 1200px;
     }
 
-    /* Download button */
+    /* ── Typography ── */
+    h1 {
+        color: #242E65 !important;
+        font-size: 1.75rem !important;
+        font-weight: 700 !important;
+        letter-spacing: -0.02em !important;
+    }
+    h2 {
+        color: #242E65 !important;
+        font-size: 1.25rem !important;
+        font-weight: 600 !important;
+        letter-spacing: -0.01em !important;
+    }
+    h3 {
+        color: #242E65 !important;
+        font-size: 1.1rem !important;
+        font-weight: 600 !important;
+    }
+
+    /* ── Dividers: subtle gray gradient fade ── */
+    hr {
+        border: none !important;
+        height: 1px !important;
+        background: linear-gradient(90deg, transparent, #e5e7eb 30%, #e5e7eb 70%, transparent) !important;
+    }
+
+    /* ── Metric cards ── */
+    [data-testid="stMetric"] {
+        background-color: #ffffff;
+        border: 1px solid #f0f1f3;
+        border-left: 4px solid #F05523;
+        border-radius: 10px;
+        padding: 0.75rem 1rem;
+        box-shadow: 0 1px 3px rgba(0,0,0,0.04);
+        transition: box-shadow 0.2s ease;
+    }
+    [data-testid="stMetric"]:hover {
+        box-shadow: 0 4px 12px rgba(0,0,0,0.08);
+    }
+    [data-testid="stMetric"] [data-testid="stMetricLabel"] {
+        font-size: 0.75rem !important;
+        font-weight: 500 !important;
+        letter-spacing: 0.05em !important;
+        text-transform: uppercase !important;
+        color: #6b7280 !important;
+    }
+    [data-testid="stMetric"] [data-testid="stMetricValue"] {
+        font-size: 1.5rem !important;
+        font-weight: 700 !important;
+        color: #242E65 !important;
+    }
+
+    /* ── Download button ── */
     [data-testid="stDownloadButton"] > button {
-        background-color: #242E65 !important;
+        background: linear-gradient(135deg, #242E65, #2d3a7e) !important;
         color: white !important;
-        border: 2px solid #F05523 !important;
+        border: none !important;
+        border-radius: 8px !important;
+        box-shadow: 0 2px 8px rgba(36,46,101,0.25) !important;
+        transition: all 0.2s ease !important;
     }
     [data-testid="stDownloadButton"] > button:hover {
-        background-color: #1a2150 !important;
+        transform: translateY(-1px) !important;
+        box-shadow: 0 4px 16px rgba(36,46,101,0.35) !important;
     }
 
-    /* Minimal gear button */
+    /* ── Minimal gear button ── */
     button[data-testid="stBaseButton-secondary"][kind="secondary"] {
         border: none;
         background: transparent;
-    }
-
-    /* Chat panel styling */
-    .chat-welcome {
-        padding: 1rem;
-        background: #F8F9FC;
         border-radius: 8px;
-        margin-bottom: 1rem;
+        transition: background-color 0.15s ease;
+    }
+    button[data-testid="stBaseButton-secondary"][kind="secondary"]:hover {
+        background-color: #f0f1f8;
     }
 
-    /* When two-panel QBR view is active, constrain the full ancestor chain
+    /* ── Chat input ── */
+    [data-testid="stChatInput"] textarea {
+        border-radius: 12px !important;
+        transition: border-color 0.2s ease, box-shadow 0.2s ease !important;
+    }
+    [data-testid="stChatInput"] textarea:focus {
+        border-color: #242E65 !important;
+        box-shadow: 0 0 0 3px rgba(36,46,101,0.1) !important;
+    }
+
+    /* ── Chat messages ── */
+    [data-testid="stChatMessage"][data-testid-role="user"] {
+        background-color: #f0f1f8;
+        border-radius: 10px;
+        padding: 0.5rem;
+    }
+    [data-testid="stChatMessage"][data-testid-role="assistant"] {
+        background-color: #ffffff;
+        border: 1px solid #f0f1f3;
+        border-radius: 10px;
+        padding: 0.5rem;
+    }
+
+    /* ── Dialog inputs ── */
+    [data-testid="stDialog"] input,
+    [data-testid="stDialog"] textarea {
+        border-radius: 8px !important;
+        transition: border-color 0.2s ease !important;
+    }
+    [data-testid="stDialog"] input:focus,
+    [data-testid="stDialog"] textarea:focus {
+        border-color: #242E65 !important;
+    }
+
+    /* ── Welcome hero ── */
+    .chat-welcome-hero {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        min-height: 50vh;
+        text-align: center;
+        padding: 2rem 1rem;
+    }
+    .chat-welcome-hero .hero-icon {
+        width: 64px;
+        height: 64px;
+        background: linear-gradient(135deg, #242E65, #2d3a7e);
+        border-radius: 16px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        margin-bottom: 1.25rem;
+        box-shadow: 0 4px 16px rgba(36,46,101,0.2);
+    }
+    .chat-welcome-hero .hero-icon span {
+        color: white;
+        font-size: 1.75rem;
+        font-weight: 700;
+        font-family: 'Inter', sans-serif;
+    }
+    .chat-welcome-hero .hero-title {
+        font-size: 1.5rem;
+        font-weight: 700;
+        color: #242E65;
+        margin: 0 0 0.5rem 0;
+    }
+    .chat-welcome-hero .hero-subtitle {
+        color: #6b7280;
+        font-size: 0.95rem;
+        max-width: 480px;
+        line-height: 1.6;
+        margin: 0;
+    }
+
+    /* ── Example prompt buttons as cards ── */
+    .st-key-example_prompts {
+        max-width: 600px;
+        margin: 0 auto;
+    }
+    .st-key-example_prompts button {
+        background: #ffffff !important;
+        border: 1px solid #e5e7eb !important;
+        border-radius: 12px !important;
+        color: #1A1A2E !important;
+        transition: all 0.2s ease !important;
+        font-weight: 500 !important;
+    }
+    .st-key-example_prompts button:hover {
+        border-color: #242E65 !important;
+        box-shadow: 0 4px 12px rgba(36,46,101,0.1) !important;
+        transform: translateY(-1px) !important;
+    }
+
+    /* ── Connection banner ── */
+    .connection-banner {
+        background: #f0f1f8;
+        border: 1px solid #e0e2ef;
+        border-radius: 10px;
+        padding: 0.75rem 1rem;
+        color: #242E65;
+        font-size: 0.9rem;
+        margin-bottom: 0.5rem;
+    }
+    .connection-banner .banner-label {
+        font-weight: 600;
+    }
+    .connection-banner .banner-desc {
+        color: #6b7280;
+        font-size: 0.85rem;
+    }
+
+    /* ── Settings dialog section headers ── */
+    [data-testid="stDialog"] h2,
+    [data-testid="stDialog"] h3 {
+        font-size: 1rem !important;
+        text-transform: uppercase !important;
+        letter-spacing: 0.06em !important;
+        color: #6b7280 !important;
+    }
+
+    /* ── When two-panel QBR view is active, constrain the full ancestor chain
        so the panels can be independently scrollable within a fixed viewport.
        The :has() selector activates only when the nested HorizontalBlock
-       (metrics row etc.) is present inside a column — i.e., QBR is shown. */
+       (metrics row etc.) is present inside a column — i.e., QBR is shown. ── */
 
     /* 1. Constrain the stMain scrollable area */
     [data-testid="stMain"]:has([data-testid="stHorizontalBlock"] [data-testid="stHorizontalBlock"]) {
@@ -148,6 +325,18 @@ st.markdown(
         height: 100%;
         overflow-y: auto;
         min-height: 0;
+    }
+
+    /* Chat panel — white conversation surface */
+    [data-testid="stHorizontalBlock"]:has([data-testid="stHorizontalBlock"]) > [data-testid="stColumn"]:nth-child(1) {
+        background-color: #ffffff;
+    }
+
+    /* Results panel — light tinted dashboard surface + vertical divider */
+    [data-testid="stHorizontalBlock"]:has([data-testid="stHorizontalBlock"]) > [data-testid="stColumn"]:nth-child(2) {
+        background-color: #f8f9fc;
+        border-left: 1px solid #e0e2ef;
+        padding-left: 1.5rem;
     }
     </style>
     """,
@@ -296,15 +485,23 @@ def _render_health_score(score: int):
 
     st.markdown(
         f"""
-        <div style="display:inline-block;background-color:{color};color:white;
-                    font-size:2.5rem;font-weight:bold;padding:0.3rem 1rem;
-                    border-radius:8px;line-height:1.2;">
-            {score}
-        </div>
-        <span style="font-size:1.1rem;color:{color};font-weight:600;
-                     margin-left:0.75rem;vertical-align:middle;">
-            {label}
-        </span>""",
+        <div style="display:flex;align-items:center;gap:1rem;">
+            <div style="background-color:{color};color:white;
+                        font-size:2.5rem;font-weight:700;padding:0.3rem 1rem;
+                        border-radius:10px;line-height:1.2;
+                        box-shadow:0 2px 8px {color}40;">
+                {score}
+            </div>
+            <div>
+                <div style="font-size:0.75rem;font-weight:500;text-transform:uppercase;
+                            letter-spacing:0.05em;color:#6b7280;">
+                    Health Score
+                </div>
+                <div style="font-size:1.1rem;font-weight:600;color:{color};">
+                    {label}
+                </div>
+            </div>
+        </div>""",
         unsafe_allow_html=True,
     )
 
@@ -361,9 +558,14 @@ def _render_risk_flags(risk_flags: list[dict]):
         sev_label = rf["severity"].upper()
         st.markdown(
             f'<div style="background-color:{bg_color};border-left:4px solid {text_color};'
-            f'padding:0.5rem 0.75rem;margin-bottom:0.5rem;border-radius:4px;">'
-            f'<span style="color:{text_color};font-weight:bold;font-size:0.75rem;">'
-            f"[{sev_label}]</span> "
+            f'padding:0.6rem 0.85rem;margin-bottom:0.5rem;border-radius:8px;'
+            f'transition:transform 0.15s ease;"'
+            f' onmouseover="this.style.transform=\'translateX(2px)\'"'
+            f' onmouseout="this.style.transform=\'translateX(0)\'">'
+            f'<span style="background:{text_color};color:white;font-weight:600;'
+            f'font-size:0.7rem;padding:2px 8px;border-radius:4px;'
+            f'letter-spacing:0.03em;display:inline-block;margin-right:0.5rem;">'
+            f"{sev_label}</span>"
             f'<span style="color:#1a1a2e;font-size:0.9rem;">{rf["flag"]}</span>'
             f"</div>",
             unsafe_allow_html=True,
@@ -624,7 +826,16 @@ def run_qbr_generation(
 # ─────────────────────────────────────────────
 @st.dialog("Settings", width="large")
 def settings_dialog():
-    st.subheader("HaloPSA Connection")
+    _conn_color = "#16a34a" if st.session_state.authenticated else "#dc2626"
+    _conn_text = "Connected" if st.session_state.authenticated else "Not connected"
+    st.markdown(
+        f'<h2 style="display:flex;align-items:center;gap:0.5rem;">'
+        f'<span style="display:inline-block;width:8px;height:8px;border-radius:50%;'
+        f'background:{_conn_color};"></span> HaloPSA Connection'
+        f'<span style="font-size:0.75rem;font-weight:400;color:{_conn_color};'
+        f'margin-left:auto;">{_conn_text}</span></h2>',
+        unsafe_allow_html=True,
+    )
     halo_url = st.text_input(
         "HaloPSA URL",
         value=st.session_state.halo_url,
@@ -1244,7 +1455,13 @@ with header_col2:
 
 # Connection status
 if not st.session_state.authenticated:
-    st.info("Open Settings (gear icon) to enter your HaloPSA credentials and connect.")
+    st.markdown(
+        '<div class="connection-banner">'
+        '<span class="banner-label">Not connected</span>'
+        '<span class="banner-desc"> -- Open Settings (gear icon) to enter your '
+        "HaloPSA credentials and connect.</span></div>",
+        unsafe_allow_html=True,
+    )
 
 # ── Two-panel layout ──
 has_results = st.session_state.qbr_bytes is not None
@@ -1260,49 +1477,59 @@ with chat_col:
     # Welcome message if chat is empty
     if not st.session_state.chat_history:
         st.markdown(
-            """<div class="chat-welcome">
-            <h3 style="margin-top:0;">Welcome to the MSP QBR Generator</h3>
-            <p>I can help you generate Quarterly Business Review reports, check client health scores, and more. Try one of these:</p>
+            """<div class="chat-welcome-hero">
+                <div class="hero-icon"><span>Q</span></div>
+                <p class="hero-title">MSP QBR Generator</p>
+                <p class="hero-subtitle">
+                    Generate polished Quarterly Business Review decks, analyze client
+                    health scores, and surface risk insights -- all through natural
+                    language conversation.
+                </p>
             </div>""",
             unsafe_allow_html=True,
         )
 
-        # Example prompt buttons
-        ex_col1, ex_col2 = st.columns(2)
-        with ex_col1:
-            if st.button(
-                "Generate a QBR for last quarter",
-                key="ex_qbr",
-                use_container_width=True,
-            ):
-                _add_message("user", "Generate a QBR for last quarter")
-                _handle_chat_message("Generate a QBR for last quarter")
-                st.rerun()
-            if st.button(
-                "List all clients",
-                key="ex_list",
-                use_container_width=True,
-            ):
-                _add_message("user", "List all clients")
-                _handle_chat_message("List all clients")
-                st.rerun()
-        with ex_col2:
-            if st.button(
-                "What can you do?",
-                key="ex_help",
-                use_container_width=True,
-            ):
-                _add_message("user", "What can you do?")
-                _handle_chat_message("What can you do?")
-                st.rerun()
-            if st.button(
-                "Enable AI with 5 recommendations",
-                key="ex_ai",
-                use_container_width=True,
-            ):
-                _add_message("user", "Enable AI with 5 recommendations")
-                _handle_chat_message("Enable AI with 5 recommendations")
-                st.rerun()
+        # Example prompt buttons (styled as cards via CSS)
+        with st.container(key="example_prompts"):
+            ex_col1, ex_col2 = st.columns(2)
+            with ex_col1:
+                st.caption("REPORTS")
+                if st.button(
+                    "Generate a QBR for last quarter",
+                    key="ex_qbr",
+                    use_container_width=True,
+                ):
+                    _add_message("user", "Generate a QBR for last quarter")
+                    _handle_chat_message("Generate a QBR for last quarter")
+                    st.rerun()
+                st.caption("CLIENTS")
+                if st.button(
+                    "List all clients",
+                    key="ex_list",
+                    use_container_width=True,
+                ):
+                    _add_message("user", "List all clients")
+                    _handle_chat_message("List all clients")
+                    st.rerun()
+            with ex_col2:
+                st.caption("HELP")
+                if st.button(
+                    "What can you do?",
+                    key="ex_help",
+                    use_container_width=True,
+                ):
+                    _add_message("user", "What can you do?")
+                    _handle_chat_message("What can you do?")
+                    st.rerun()
+                st.caption("AI SETTINGS")
+                if st.button(
+                    "Enable AI with 5 recommendations",
+                    key="ex_ai",
+                    use_container_width=True,
+                ):
+                    _add_message("user", "Enable AI with 5 recommendations")
+                    _handle_chat_message("Enable AI with 5 recommendations")
+                    st.rerun()
 
     # Render chat history
     for msg in st.session_state.chat_history:
