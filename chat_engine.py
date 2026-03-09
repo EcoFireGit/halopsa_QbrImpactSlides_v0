@@ -59,7 +59,7 @@ _INTENT_PATTERNS = [
     (
         Intent.SET_CLIENT_PROFILE,
         re.compile(
-            r"employees?|hourly\s*rate|employee\s*count|workforce|headcount",
+            r"employees?|hourly\s*rate|employee\s*count|workforce|headcount|/\s*hr\b|per\s*hour",
             re.IGNORECASE,
         ),
     ),
