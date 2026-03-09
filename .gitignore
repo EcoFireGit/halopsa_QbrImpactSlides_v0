@@ -213,3 +213,8 @@ __marimo__/
 
 # Client profile data (per-client employee count + hourly rate)
 client_profiles.json
+
+# Chat preferences (AI settings + per-client industry)
+chat_preferences.json
+
+.playwright-mcp/

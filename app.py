@@ -1,9 +1,9 @@
 """
-MSP QBR Generator - Streamlit Web App
-Branded UI with settings dialog, auto-connect, and dashboard results.
+MSP QBR Generator - Chat-Driven Streamlit Web App
+Natural language chat interface with results dashboard panel.
 
 Prerequisites:
-    pip install streamlit python-pptx matplotlib requests python-dotenv
+    pip install streamlit python-pptx matplotlib requests python-dotenv anthropic
 
 Usage:
     streamlit run app.py
@@ -19,13 +19,33 @@ from dotenv import load_dotenv
 from generate_client_qbr import calculate_metrics, calculate_health_score, generate_qbr
 from halo_client import HaloClient
 from client_profiles import get_profile, upsert_profile
+from chat_preferences import (
+    get_ai_settings,
+    update_ai_settings,
+    get_client_industry,
+    set_client_industry,
+    get_msp_contact,
+    set_msp_contact,
+)
+from chat_engine import (
+    Intent,
+    parse_intent_regex,
+    parse_intent_llm,
+    parse_date_expression,
+    resolve_client,
+    resolve_disambiguation,
+    get_missing_fields,
+    get_optional_prompts,
+    format_help_message,
+    format_client_list,
+    format_disambiguation,
+    match_industry,
+)
 
-# Load .env from the current working directory (values are fallbacks if not
-# entered by the user in the sidebar).
 load_dotenv()
 
 # ─────────────────────────────────────────────
-# ENV DEFAULTS (used to pre-fill settings fields)
+# ENV DEFAULTS
 # ─────────────────────────────────────────────
 _env_halo_url = os.environ.get("HALO_HOST", "")
 _env_client_id = os.environ.get("CLIENT_ID", "")
@@ -39,12 +59,12 @@ _env_bea_key = os.environ.get("BEA_API_KEY", "")
 st.set_page_config(page_title="MSP QBR Generator", layout="wide")
 
 # ─────────────────────────────────────────────
-# CUSTOM CSS — Brand Colors & Layout
+# CUSTOM CSS
 # ─────────────────────────────────────────────
 st.markdown(
     """
     <style>
-    /* Hide sidebar completely */
+    /* Hide sidebar */
     [data-testid="stSidebar"] { display: none; }
     section[data-testid="stSidebarNav"] { display: none; }
 
@@ -77,6 +97,58 @@ st.markdown(
         border: none;
         background: transparent;
     }
+
+    /* Chat panel styling */
+    .chat-welcome {
+        padding: 1rem;
+        background: #F8F9FC;
+        border-radius: 8px;
+        margin-bottom: 1rem;
+    }
+
+    /* When two-panel QBR view is active, constrain the full ancestor chain
+       so the panels can be independently scrollable within a fixed viewport.
+       The :has() selector activates only when the nested HorizontalBlock
+       (metrics row etc.) is present inside a column — i.e., QBR is shown. */
+
+    /* 1. Constrain the stMain scrollable area */
+    [data-testid="stMain"]:has([data-testid="stHorizontalBlock"] [data-testid="stHorizontalBlock"]) {
+        height: 100vh;
+        overflow: hidden;
+    }
+
+    /* 2. Constrain stMainBlockContainer */
+    [data-testid="stMainBlockContainer"]:has([data-testid="stHorizontalBlock"] [data-testid="stHorizontalBlock"]) {
+        height: 100%;
+        overflow: hidden;
+        padding-bottom: 0 !important;
+    }
+
+    /* 3. stVerticalBlock fills height and allows flex children to shrink */
+    [data-testid="stMainBlockContainer"]:has([data-testid="stHorizontalBlock"] [data-testid="stHorizontalBlock"]) > [data-testid="stVerticalBlock"] {
+        height: 100%;
+        overflow: hidden;
+    }
+
+    /* 4. The stLayoutWrapper wrapping the main panel block grows to fill remaining space */
+    [data-testid="stMainBlockContainer"]:has([data-testid="stHorizontalBlock"] [data-testid="stHorizontalBlock"]) > [data-testid="stVerticalBlock"] > [data-testid="stLayoutWrapper"]:has([data-testid="stHorizontalBlock"] [data-testid="stHorizontalBlock"]) {
+        flex: 1;
+        min-height: 0;
+        overflow: hidden;
+    }
+
+    /* 5. The main two-panel HorizontalBlock fills the wrapper */
+    [data-testid="stHorizontalBlock"]:has([data-testid="stHorizontalBlock"]) {
+        height: 100%;
+        overflow: hidden;
+    }
+
+    /* 6. Each column scrolls independently */
+    [data-testid="stHorizontalBlock"]:has([data-testid="stHorizontalBlock"]) > [data-testid="stColumn"] {
+        height: 100%;
+        overflow-y: auto;
+        min-height: 0;
+    }
     </style>
     """,
     unsafe_allow_html=True,
@@ -85,6 +157,7 @@ st.markdown(
 # ─────────────────────────────────────────────
 # SESSION STATE INITIALISATION
 # ─────────────────────────────────────────────
+_ai_prefs = get_ai_settings()
 _defaults = {
     "authenticated": False,
     "clients": [],
@@ -93,22 +166,27 @@ _defaults = {
     "qbr_filename": "QBR_Report.pptx",
     "bea_insights": None,
     "bea_industry_name": None,
-    "num_recs": 3,
-    "sample_size": 100,
+    "num_recs": _ai_prefs["num_recs"],
+    "sample_size": _ai_prefs["sample_size"],
     "health_score": None,
     "metrics_display": None,
     "business_impact": None,
     "risk_flags": None,
     "client_employee_count": 0,
     "client_avg_hourly_rate": 50.0,
-    # Settings dialog values (pre-filled from .env)
+    # Settings dialog values
     "halo_url": _env_halo_url,
     "client_id_val": _env_client_id,
     "client_secret_val": _env_client_secret,
     "anthropic_key": _env_anthropic_key,
     "bea_key": _env_bea_key,
-    "use_ai": True,
+    "use_ai": _ai_prefs["use_ai"],
     "auto_connect_attempted": False,
+    # Chat state
+    "chat_history": [],
+    "conv_state": {},
+    "results_visible": True,
+    "results_collapsed": False,
 }
 for key, default in _defaults.items():
     if key not in st.session_state:
@@ -144,8 +222,13 @@ def try_authenticate(halo_url, client_id, client_secret):
         return False, str(e)
 
 
+def _add_message(role: str, content: str):
+    """Append a message to chat history."""
+    st.session_state.chat_history.append({"role": role, "content": content})
+
+
 def _render_bea_panel(insights: dict, industry_name: str):
-    """Render the BEA economic context panel: metrics + trend chart."""
+    """Render the BEA economic context panel."""
     import matplotlib.pyplot as plt
     import matplotlib.ticker as mticker
 
@@ -177,7 +260,6 @@ def _render_bea_panel(insights: dict, industry_name: str):
     with col4:
         st.metric("Latest Period", insights.get("latest_period", "N/A"))
 
-    # Trend chart
     labels = insights.get("trend_labels", [])
     values = insights.get("trend_values", [])
     valid_pairs = [(lbl, val) for lbl, val in zip(labels, values) if val is not None]
@@ -192,7 +274,7 @@ def _render_bea_panel(insights: dict, industry_name: str):
         ax.yaxis.set_major_formatter(mticker.FuncFormatter(lambda x, _: f"${x:.0f}B"))
         ax.tick_params(axis="x", labelsize=8, rotation=30)
         ax.tick_params(axis="y", labelsize=8)
-        ax.set_title(f"{industry_name} — 8-Quarter GDP Trend", fontsize=10)
+        ax.set_title(f"{industry_name} -- 8-Quarter GDP Trend", fontsize=10)
         ax.spines[["top", "right"]].set_visible(False)
         fig.tight_layout()
         st.pyplot(fig)
@@ -228,13 +310,13 @@ def _render_health_score(score: int):
 
 
 def _render_business_impact(impact: dict):
-    """Render business impact metrics: critical tickets, hours, cost + risk statement."""
+    """Render business impact metrics."""
     st.subheader("Business Impact")
 
     if not impact.get("has_data"):
         st.info(
-            "Enter employee count and hourly rate in the Client Profile section "
-            "to see business impact estimates."
+            "Set employee count and hourly rate via chat to see business impact estimates. "
+            "Example: 'Acme has 150 employees at $75/hr'"
         )
         return
 
@@ -289,10 +371,22 @@ def _render_risk_flags(risk_flags: list[dict]):
 
 
 def _render_results_dashboard():
-    """Render the dashboard-style results view after QBR generation."""
+    """Render the dashboard-style results view."""
+    # Collapse toggle
+    if st.button(
+        "Hide Results" if not st.session_state.results_collapsed else "Show Results",
+        key="collapse_results",
+        use_container_width=True,
+    ):
+        st.session_state.results_collapsed = not st.session_state.results_collapsed
+        st.rerun()
+
+    if st.session_state.results_collapsed:
+        return
+
     st.markdown("---")
 
-    # Download button — prominent, at top
+    # Download button
     st.download_button(
         label="Download PowerPoint QBR",
         data=st.session_state.qbr_bytes,
@@ -335,7 +429,7 @@ def _render_results_dashboard():
             "Critical Resolution Time, Avg First Response (25 pts each)"
         )
 
-    # Business Impact card
+    # Business Impact
     if st.session_state.get("business_impact"):
         st.markdown("---")
         _render_business_impact(st.session_state.business_impact)
@@ -370,9 +464,7 @@ def run_qbr_generation(
     avg_hourly_rate=50.0,
 ):
     from recommendation_engine import generate_recommendations
-    from generate_client_qbr import (
-        build_recommendation_replacements,
-    )
+    from generate_client_qbr import build_recommendation_replacements
     from bea_client import BEAClient
     from bea_insights import (
         INDUSTRY_SECTORS,
@@ -385,70 +477,66 @@ def run_qbr_generation(
         format_impact_replacements,
         build_empty_impact_replacements,
     )
-    from risk_analyzer import (
-        analyze_risks,
-        format_risk_replacements,
-    )
+    from risk_analyzer import analyze_risks, format_risk_replacements
 
     client = st.session_state.halo_client
     client_id = selected_client["id"]
     client_name = selected_client["name"]
     review_period = (
-        f"{start_date.strftime('%B %d, %Y')} – {end_date.strftime('%B %d, %Y')}"
+        f"{start_date.strftime('%B %d, %Y')} -- {end_date.strftime('%B %d, %Y')}"
     )
 
     # 1. Fetch tickets
-    with st.spinner("Fetching tickets from HaloPSA..."):
-        data = client.get_tickets(
-            client_id=client_id,
-            start_date=start_date.strftime("%Y-%m-%d"),
-            end_date=end_date.strftime("%Y-%m-%d"),
-            page_size=500,
-        )
-        tickets = data.get("tickets", []) if isinstance(data, dict) else (data or [])
+    _add_message("assistant", f"Fetching tickets for **{client_name}**...")
+    data = client.get_tickets(
+        client_id=client_id,
+        start_date=start_date.strftime("%Y-%m-%d"),
+        end_date=end_date.strftime("%Y-%m-%d"),
+        page_size=500,
+    )
+    tickets = data.get("tickets", []) if isinstance(data, dict) else (data or [])
 
     if not tickets:
-        st.warning(
-            f"No tickets found for **{client_name}** in the selected date range."
+        _add_message(
+            "assistant",
+            f"No tickets found for **{client_name}** in the selected date range.",
         )
         return None, None, None
 
     if use_ai and anthropic_key and len(tickets) > sample_size:
-        st.info(
+        _add_message(
+            "assistant",
             f"Retrieved **{len(tickets)}** tickets "
-            f"(**{sample_size}** will be sampled for AI analysis)."
+            f"(**{sample_size}** will be sampled for AI analysis).",
         )
     else:
-        st.info(f"Retrieved **{len(tickets)}** tickets.")
+        _add_message("assistant", f"Retrieved **{len(tickets)}** tickets.")
 
     # 2. Compute metrics
     metrics_data = calculate_metrics(tickets)
     health_score = calculate_health_score(metrics_data)
-
-    # Store metrics for dashboard display
     st.session_state.metrics_display = metrics_data
 
-    # 2.5 Fetch BEA economic context (optional)
+    # 2.5 Fetch BEA economic context
     bea_replacements = build_empty_bea_replacements()
     if bea_api_key and selected_industry_name:
-        with st.spinner(f"Fetching BEA data for {selected_industry_name}..."):
-            try:
-                bea_client = BEAClient(api_key=bea_api_key)
-                raw_rows = bea_client.get_gdp_by_industry(
-                    INDUSTRY_SECTORS[selected_industry_name], num_quarters=8
-                )
-                insights = calculate_sector_growth(raw_rows)
-                bea_replacements = format_bea_replacements(
-                    selected_industry_name, insights
-                )
-                st.session_state.bea_insights = insights
-                st.session_state.bea_industry_name = selected_industry_name
-            except (ValueError, Exception) as e:
-                st.warning(
-                    f"BEA data unavailable: {e}. QBR proceeds without economic context."
-                )
+        _add_message("assistant", f"Fetching BEA data for {selected_industry_name}...")
+        try:
+            bea_client = BEAClient(api_key=bea_api_key)
+            raw_rows = bea_client.get_gdp_by_industry(
+                INDUSTRY_SECTORS[selected_industry_name], num_quarters=8
+            )
+            insights = calculate_sector_growth(raw_rows)
+            bea_replacements = format_bea_replacements(selected_industry_name, insights)
+            st.session_state.bea_insights = insights
+            st.session_state.bea_industry_name = selected_industry_name
+        except Exception as e:
+            _add_message(
+                "assistant",
+                f"BEA data unavailable: {e}. Proceeding without economic context.",
+            )
 
-    # 2c. Calculate business impact
+    # 2c. Business impact
     impact_replacements = build_empty_impact_replacements()
     impact = calculate_business_impact(
         metrics_data, tickets, employee_count, avg_hourly_rate
@@ -457,35 +545,33 @@ def run_qbr_generation(
     if impact["has_data"]:
         impact_replacements = format_impact_replacements(impact)
 
-    # 2d. Analyze risks
+    # 2d. Risk analysis
     risk_flags = analyze_risks(tickets)
     st.session_state.risk_flags = risk_flags
     risk_replacements = format_risk_replacements(risk_flags)
 
-    # 3. Generate recommendations
+    # 3. Recommendations
     if use_ai and anthropic_key:
-        with st.spinner(f"AI is generating {num_recs} recommendations..."):
-            sampled = tickets[:sample_size]
-            summaries = [t.get("summary", "") for t in sampled if t.get("summary")]
+        _add_message("assistant", f"AI is generating {num_recs} recommendations...")
+        sampled = tickets[:sample_size]
+        summaries = [t.get("summary", "") for t in sampled if t.get("summary")]
 
-            try:
-                recommendations = generate_recommendations(
-                    client_name=client_name,
-                    review_period=review_period,
-                    metrics=metrics_data,
-                    ticket_summaries=summaries,
-                    num_recommendations=num_recs,
-                    anthropic_api_key=anthropic_key,
-                    employee_count=employee_count,
-                    avg_hourly_rate=avg_hourly_rate,
-                    business_impact=impact,
-                    risk_flags=risk_flags,
-                )
-                st.success(f"AI generated {len(recommendations)} recommendations.")
-
-            except Exception as e:
-                st.error(f"Claude API error: {e}")
-                return None, None, None
+        try:
+            recommendations = generate_recommendations(
+                client_name=client_name,
+                review_period=review_period,
+                metrics=metrics_data,
+                ticket_summaries=summaries,
+                num_recommendations=num_recs,
+                anthropic_api_key=anthropic_key,
+                employee_count=employee_count,
+                avg_hourly_rate=avg_hourly_rate,
+                business_impact=impact,
+                risk_flags=risk_flags,
+            )
+        except Exception as e:
+            _add_message("assistant", f"Claude API error: {e}")
+            return None, None, None
     else:
         recommendations = [
             {"title": f"Recommendation {i + 1}", "rationale": rec}
@@ -493,7 +579,7 @@ def run_qbr_generation(
             if rec
         ]
 
-    # 4. Build all replacement data
+    # 4. Build replacements
     rec_replacements = build_recommendation_replacements(recommendations)
     contextual_data = {
         "{{CLIENT_NAME}}": client_name,
@@ -507,26 +593,26 @@ def run_qbr_generation(
     }
 
     # 5. Generate PPTX
-    with st.spinner("Generating PowerPoint..."):
-        template_path = "Master_QBR_Template.pptx"
-        if not os.path.exists(template_path):
-            st.error("Master_QBR_Template.pptx not found.")
-            return None, None, None
+    _add_message("assistant", "Generating PowerPoint...")
+    template_path = "Master_QBR_Template.pptx"
+    if not os.path.exists(template_path):
+        _add_message("assistant", "Master_QBR_Template.pptx not found.")
+        return None, None, None
 
-        with tempfile.NamedTemporaryFile(suffix=".pptx", delete=False) as tmp:
-            output_path = tmp.name
+    with tempfile.NamedTemporaryFile(suffix=".pptx", delete=False) as tmp:
+        output_path = tmp.name
 
-        generate_qbr(
-            template_path=template_path,
-            output_path=output_path,
-            contextual_data=contextual_data,
-            ticket_data=tickets,
-            num_recs=num_recs,
-        )
+    generate_qbr(
+        template_path=template_path,
+        output_path=output_path,
+        contextual_data=contextual_data,
+        ticket_data=tickets,
+        num_recs=num_recs,
+    )
 
-        with open(output_path, "rb") as f:
-            pptx_bytes = f.read()
-        os.remove(output_path)
+    with open(output_path, "rb") as f:
+        pptx_bytes = f.read()
+    os.remove(output_path)
 
     safe_name = client_name.replace(" ", "_").replace("/", "-")
     filename = f"{safe_name}_QBR_{start_date.strftime('%Y%m%d')}.pptx"
@@ -534,7 +620,7 @@ def run_qbr_generation(
 
 
 # ─────────────────────────────────────────────
-# SETTINGS DIALOG
+# SETTINGS DIALOG (credentials only)
 # ─────────────────────────────────────────────
 @st.dialog("Settings", width="large")
 def settings_dialog():
@@ -560,38 +646,14 @@ def settings_dialog():
         )
 
     st.markdown("---")
-    st.subheader("AI Recommendations")
+    st.subheader("API Keys")
     anthropic_key = st.text_input(
         "Anthropic API Key",
         value=st.session_state.anthropic_key,
         placeholder="sk-ant-...",
         type="password",
-        help="Used only for this session. Leave blank to use ANTHROPIC_API_KEY from .env.",
+        help="Used for AI recommendations and chat intent parsing.",
     )
-    use_ai = st.toggle(
-        "Generate AI Recommendations",
-        value=st.session_state.use_ai,
-        help="Use Claude to generate strategic recommendations from ticket data.",
-    )
-
-    num_recs = st.slider(
-        "Number of Recommendations",
-        min_value=1,
-        max_value=10,
-        value=st.session_state.num_recs,
-        help="How many strategic recommendations Claude will generate.",
-    )
-    sample_size = st.slider(
-        "Ticket Sample Size for AI Analysis",
-        min_value=10,
-        max_value=500,
-        step=10,
-        value=st.session_state.sample_size,
-        help="Number of recent ticket summaries to send to Claude for analysis.",
-    )
-
-    st.markdown("---")
-    st.subheader("Economic Context (BEA)")
     bea_key = st.text_input(
         "BEA API Key",
         value=st.session_state.bea_key,
@@ -608,9 +670,6 @@ def settings_dialog():
             st.session_state.client_id_val = client_id
             st.session_state.client_secret_val = client_secret
             st.session_state.anthropic_key = anthropic_key
-            st.session_state.use_ai = use_ai
-            st.session_state.num_recs = num_recs
-            st.session_state.sample_size = sample_size
             st.session_state.bea_key = bea_key
             st.rerun()
     with btn_col2:
@@ -618,14 +677,10 @@ def settings_dialog():
             if not halo_url or not client_id or not client_secret:
                 st.error("HaloPSA URL, Client ID, and Client Secret are required.")
             else:
-                # Save values first
                 st.session_state.halo_url = halo_url
                 st.session_state.client_id_val = client_id
                 st.session_state.client_secret_val = client_secret
                 st.session_state.anthropic_key = anthropic_key
-                st.session_state.use_ai = use_ai
-                st.session_state.num_recs = num_recs
-                st.session_state.sample_size = sample_size
                 st.session_state.bea_key = bea_key
                 with st.spinner("Connecting..."):
                     success, error = try_authenticate(
@@ -638,6 +693,521 @@ def settings_dialog():
                     st.rerun()
                 else:
                     st.error(f"Connection failed: {error}")
+
+
+# ─────────────────────────────────────────────
+# CHAT MESSAGE HANDLER
+# ─────────────────────────────────────────────
+def _handle_chat_message(user_message: str):
+    """Process a user chat message: parse intent, execute action, respond."""
+    state = st.session_state.conv_state
+
+    # Handle disambiguation response
+    if state.get("awaiting") == "disambiguation":
+        candidates = state.get("pending_disambiguation", [])
+        selected = resolve_disambiguation(user_message, candidates)
+        if selected:
+            state["client_id"] = selected["id"]
+            state["client_name"] = selected["name"]
+            state["awaiting"] = None
+            state["pending_disambiguation"] = None
+            _add_message("assistant", f"Selected **{selected['name']}**.")
+            # Load persisted profile for this client
+            profile = get_profile(selected["id"])
+            if profile["employee_count"] > 0:
+                state["employee_count"] = profile["employee_count"]
+                state["avg_hourly_rate"] = profile["avg_hourly_rate"]
+            # Load persisted industry
+            saved_industry = get_client_industry(selected["id"])
+            if saved_industry:
+                state["industry_name"] = saved_industry
+            # Continue checking for missing fields
+            _check_and_prompt_missing(state)
+            return
+        else:
+            _add_message(
+                "assistant",
+                "I couldn't match that. Please reply with a number from the list "
+                "or the full client name.",
+            )
+            return
+
+    # Handle awaiting responses (follow-up questions)
+    if state.get("awaiting") == "date_range":
+        date_range = parse_date_expression(user_message)
+        if date_range:
+            state["start_date"] = date_range[0].isoformat()
+            state["end_date"] = date_range[1].isoformat()
+            state["awaiting"] = None
+            _add_message(
+                "assistant",
+                f"Date range set: **{date_range[0].strftime('%B %d, %Y')}** to "
+                f"**{date_range[1].strftime('%B %d, %Y')}**.",
+            )
+            _check_and_prompt_missing(state)
+            return
+        else:
+            _add_message(
+                "assistant",
+                "I couldn't parse that date range. Try something like "
+                "'last quarter', 'Q4 2025', or 'January to March 2026'.",
+            )
+            return
+
+    if state.get("awaiting") == "msp_contact":
+        state["msp_contact"] = user_message.strip()
+        state["awaiting"] = None
+        set_msp_contact(user_message.strip())
+        _add_message("assistant", f"MSP contact set: **{user_message.strip()}**.")
+        _check_and_prompt_missing(state)
+        return
+
+    if state.get("awaiting") == "employee_count":
+        lower = user_message.lower().strip()
+        if lower == "skip":
+            state["asked_employee_count"] = True
+            state["awaiting"] = None
+            _check_and_prompt_missing(state)
+            return
+        # Try to extract number
+        import re
+
+        match = re.search(r"(\d+)", user_message)
+        if match:
+            emp_count = int(match.group(1))
+            state["employee_count"] = emp_count
+            state["awaiting"] = None
+            # Also check for hourly rate in same message
+            rate_match = re.search(
+                r"\$?\s*(\d+(?:\.\d+)?)\s*(?:/\s*hr|per\s*hour|hourly)",
+                user_message,
+                re.IGNORECASE,
+            )
+            if rate_match:
+                state["avg_hourly_rate"] = float(rate_match.group(1))
+                _add_message(
+                    "assistant",
+                    f"Set **{emp_count}** employees at "
+                    f"**${state['avg_hourly_rate']:.0f}/hr**.",
+                )
+            else:
+                _add_message("assistant", f"Set employee count to **{emp_count}**.")
+                state["awaiting"] = "hourly_rate"
+                _add_message(
+                    "assistant",
+                    "What is the average loaded hourly rate for this client? "
+                    "(e.g., '$75/hr' or just '75'). Type 'skip' for default $50/hr.",
+                )
+                return
+            # Persist profile
+            if state.get("client_id"):
+                upsert_profile(
+                    state["client_id"],
+                    state.get("employee_count", 0),
+                    state.get("avg_hourly_rate", 50.0),
+                )
+            _check_and_prompt_missing(state)
+            return
+        _add_message(
+            "assistant",
+            "Please enter a number for employee count, or type 'skip'.",
+        )
+        return
+
+    if state.get("awaiting") == "hourly_rate":
+        lower = user_message.lower().strip()
+        if lower == "skip":
+            state["avg_hourly_rate"] = 50.0
+            state["awaiting"] = None
+            _add_message("assistant", "Using default rate of **$50/hr**.")
+            if state.get("client_id"):
+                upsert_profile(
+                    state["client_id"],
+                    state.get("employee_count", 0),
+                    state.get("avg_hourly_rate", 50.0),
+                )
+            _check_and_prompt_missing(state)
+            return
+        import re
+
+        match = re.search(r"(\d+(?:\.\d+)?)", user_message)
+        if match:
+            state["avg_hourly_rate"] = float(match.group(1))
+            state["awaiting"] = None
+            _add_message(
+                "assistant",
+                f"Hourly rate set to **${state['avg_hourly_rate']:.0f}/hr**.",
+            )
+            if state.get("client_id"):
+                upsert_profile(
+                    state["client_id"],
+                    state.get("employee_count", 0),
+                    state.get("avg_hourly_rate", 50.0),
+                )
+            _check_and_prompt_missing(state)
+            return
+        _add_message(
+            "assistant",
+            "Please enter a number for hourly rate, or type 'skip'.",
+        )
+        return
+
+    if state.get("awaiting") == "industry":
+        lower = user_message.lower().strip()
+        if lower == "skip":
+            state["asked_industry"] = True
+            state["awaiting"] = None
+            _check_and_prompt_missing(state)
+            return
+        matched = match_industry(user_message)
+        if matched:
+            state["industry_name"] = matched
+            state["awaiting"] = None
+            _add_message("assistant", f"Industry set to **{matched}**.")
+            if state.get("client_id"):
+                set_client_industry(state["client_id"], matched)
+            _check_and_prompt_missing(state)
+            return
+        _add_message(
+            "assistant",
+            "I couldn't match that industry. Try: Healthcare, Finance, IT, "
+            "Manufacturing, Retail, Construction, Education, etc. Or type 'skip'.",
+        )
+        return
+
+    # ── Normal intent parsing ────────────────────
+    intent, params = parse_intent_regex(user_message)
+
+    # Fall back to LLM for unknown intents
+    if intent == Intent.UNKNOWN and st.session_state.anthropic_key:
+        intent, params = parse_intent_llm(
+            user_message,
+            st.session_state.chat_history,
+            state,
+            st.session_state.anthropic_key,
+        )
+
+    # ── Handle skip from LLM ────────────────────
+    if params.get("is_skip"):
+        if state.get("awaiting"):
+            state[f"asked_{state['awaiting']}"] = True
+            state["awaiting"] = None
+            _check_and_prompt_missing(state)
+            return
+
+    # ── Route by intent ──────────────────────────
+    if intent == Intent.HELP:
+        _add_message("assistant", format_help_message())
+        return
+
+    if intent == Intent.LIST_CLIENTS:
+        if not st.session_state.authenticated:
+            _add_message(
+                "assistant",
+                "Not connected to HaloPSA. Please configure credentials in Settings (gear icon).",
+            )
+            return
+        _add_message("assistant", format_client_list(st.session_state.clients))
+        return
+
+    if intent == Intent.SET_AI_SETTINGS:
+        updated = update_ai_settings(
+            use_ai=params.get("use_ai"),
+            num_recs=params.get("num_recs"),
+            sample_size=params.get("sample_size"),
+        )
+        st.session_state.use_ai = updated["use_ai"]
+        st.session_state.num_recs = updated["num_recs"]
+        st.session_state.sample_size = updated["sample_size"]
+
+        parts = []
+        if "use_ai" in params:
+            parts.append(
+                f"AI recommendations **{'enabled' if updated['use_ai'] else 'disabled'}**"
+            )
+        if "num_recs" in params:
+            parts.append(f"Number of recommendations: **{updated['num_recs']}**")
+        if "sample_size" in params:
+            parts.append(f"Sample size: **{updated['sample_size']}**")
+        _add_message("assistant", "Settings updated. " + ". ".join(parts) + ".")
+        return
+
+    if intent == Intent.SET_CLIENT_PROFILE:
+        # Need to know which client
+        if not state.get("client_id"):
+            # Try to find client name in params
+            client_name = params.get("client_name")
+            if client_name and st.session_state.authenticated:
+                matches = resolve_client(client_name, st.session_state.clients)
+                if len(matches) == 1:
+                    state["client_id"] = matches[0]["id"]
+                    state["client_name"] = matches[0]["name"]
+                elif len(matches) > 1:
+                    _add_message(
+                        "assistant",
+                        "Which client? " + format_disambiguation(matches),
+                    )
+                    return
+
+        emp = params.get("employee_count")
+        rate = params.get("avg_hourly_rate")
+        if state.get("client_id"):
+            profile = get_profile(state["client_id"])
+            if emp is not None:
+                profile["employee_count"] = emp
+                state["employee_count"] = emp
+            if rate is not None:
+                profile["avg_hourly_rate"] = rate
+                state["avg_hourly_rate"] = rate
+            upsert_profile(
+                state["client_id"],
+                profile["employee_count"],
+                profile["avg_hourly_rate"],
+            )
+            _add_message(
+                "assistant",
+                f"Updated profile for **{state.get('client_name', 'client')}**: "
+                f"{profile['employee_count']} employees, "
+                f"${profile['avg_hourly_rate']:.0f}/hr.",
+            )
+        else:
+            _add_message(
+                "assistant",
+                "Which client should I update? Please specify the client name.",
+            )
+        return
+
+    if intent == Intent.SET_INDUSTRY:
+        industry_text = params.get("industry_name") or user_message
+        matched = match_industry(industry_text)
+        if matched:
+            if state.get("client_id"):
+                state["industry_name"] = matched
+                set_client_industry(state["client_id"], matched)
+                _add_message(
+                    "assistant",
+                    f"Industry for **{state.get('client_name', 'client')}** "
+                    f"set to **{matched}**.",
+                )
+            else:
+                _add_message(
+                    "assistant",
+                    "Which client? Please select a client first "
+                    "(e.g., 'Generate QBR for Acme').",
+                )
+        else:
+            _add_message(
+                "assistant",
+                "I couldn't match that industry. Try: Healthcare, Finance, IT, "
+                "Manufacturing, Retail, Construction, Education, etc.",
+            )
+        return
+
+    if intent == Intent.SHOW_LAST_QBR:
+        if st.session_state.qbr_bytes:
+            st.session_state.results_collapsed = False
+            _add_message(
+                "assistant",
+                f"The last generated QBR is available in the Results panel: "
+                f"**{st.session_state.qbr_filename}**.",
+            )
+        else:
+            _add_message("assistant", "No QBR has been generated yet in this session.")
+        return
+
+    if intent == Intent.SHOW_HEALTH_SCORE:
+        if not st.session_state.authenticated:
+            _add_message(
+                "assistant",
+                "Not connected to HaloPSA. Please configure credentials in Settings.",
+            )
+            return
+        client_name = params.get("client_name")
+        if not client_name:
+            _add_message("assistant", "Which client? Please specify the client name.")
+            return
+        matches = resolve_client(client_name, st.session_state.clients)
+        if not matches:
+            _add_message(
+                "assistant",
+                f"No client matching '{client_name}' found.",
+            )
+            return
+        if len(matches) > 1:
+            _add_message("assistant", format_disambiguation(matches))
+            return
+        target = matches[0]
+        # Fetch recent tickets and compute score
+        today = date.today()
+        start = today - timedelta(days=90)
+        halo = st.session_state.halo_client
+        data = halo.get_tickets(
+            client_id=target["id"],
+            start_date=start.strftime("%Y-%m-%d"),
+            end_date=today.strftime("%Y-%m-%d"),
+            page_size=500,
+        )
+        tickets = data.get("tickets", []) if isinstance(data, dict) else (data or [])
+        if not tickets:
+            _add_message(
+                "assistant",
+                f"No tickets found for **{target['name']}** in the last 90 days.",
+            )
+            return
+        metrics = calculate_metrics(tickets)
+        score = calculate_health_score(metrics)
+        if score >= 80:
+            label = "Excellent"
+        elif score >= 50:
+            label = "Needs Attention"
+        else:
+            label = "At Risk"
+        _add_message(
+            "assistant",
+            f"**{target['name']}** health score (last 90 days): "
+            f"**{score}** ({label})\n\n"
+            f"- Same-Day Resolution: {metrics.get('{{SAME_DAY_RATE}}', 'N/A')}%\n"
+            f"- Avg First Response: {metrics.get('{{AVG_FIRST_RESPONSE}}', 'N/A')}\n"
+            f"- Critical Resolution: {metrics.get('{{CRITICAL_RES_TIME}}', 'N/A')}\n"
+            f"- Proactive: {metrics.get('{{PROACTIVE_PERCENT}}', 'N/A')}%",
+        )
+        return
+
+    if intent == Intent.GENERATE_QBR:
+        if not st.session_state.authenticated:
+            _add_message(
+                "assistant",
+                "Not connected to HaloPSA. Please configure credentials "
+                "in Settings (gear icon).",
+            )
+            return
+
+        # Merge params into state
+        if params.get("client_name"):
+            matches = resolve_client(params["client_name"], st.session_state.clients)
+            if not matches:
+                _add_message(
+                    "assistant",
+                    f"No client matching '{params['client_name']}' found. "
+                    f"Try 'list clients' to see available clients.",
+                )
+                return
+            if len(matches) == 1:
+                state["client_id"] = matches[0]["id"]
+                state["client_name"] = matches[0]["name"]
+                # Load persisted profile
+                profile = get_profile(matches[0]["id"])
+                if profile["employee_count"] > 0:
+                    state["employee_count"] = profile["employee_count"]
+                    state["avg_hourly_rate"] = profile["avg_hourly_rate"]
+                saved_industry = get_client_industry(matches[0]["id"])
+                if saved_industry:
+                    state["industry_name"] = saved_industry
+                _add_message("assistant", f"Client: **{matches[0]['name']}**.")
+            elif len(matches) > 1:
+                state["awaiting"] = "disambiguation"
+                state["pending_disambiguation"] = matches
+                _add_message("assistant", format_disambiguation(matches))
+                return
+
+        if params.get("start_date"):
+            state["start_date"] = params["start_date"].isoformat()
+            state["end_date"] = params["end_date"].isoformat()
+
+        if params.get("msp_contact"):
+            state["msp_contact"] = params["msp_contact"]
+
+        # Load persisted MSP contact if not already set
+        if not state.get("msp_contact"):
+            saved_contact = get_msp_contact()
+            if saved_contact:
+                state["msp_contact"] = saved_contact
+
+        _check_and_prompt_missing(state)
+        return
+
+    # Unknown intent
+    if st.session_state.anthropic_key:
+        _add_message(
+            "assistant",
+            "I'm not sure what you mean. Type 'help' to see what I can do.",
+        )
+    else:
+        _add_message("assistant", format_help_message())
+
+
+def _check_and_prompt_missing(state: dict):
+    """Check for missing required/optional fields, prompt or execute QBR."""
+    # Check required fields
+    missing = get_missing_fields(state)
+    if missing:
+        if "client" in missing.lower():
+            state["awaiting"] = "client"
+        elif "date" in missing.lower():
+            state["awaiting"] = "date_range"
+        elif "contact" in missing.lower():
+            state["awaiting"] = "msp_contact"
+        _add_message("assistant", missing)
+        return
+
+    # Check optional fields
+    has_bea = bool(st.session_state.bea_key)
+    optional = get_optional_prompts(state, has_bea)
+    if optional:
+        if "employee" in optional.lower():
+            state["awaiting"] = "employee_count"
+        elif "industry" in optional.lower():
+            state["awaiting"] = "industry"
+        _add_message("assistant", optional)
+        return
+
+    # All fields collected -- run QBR generation
+    _execute_qbr(state)
+
+
+def _execute_qbr(state: dict):
+    """Execute the QBR generation pipeline with collected state."""
+    from datetime import date as date_cls
+
+    selected_client = {"id": state["client_id"], "name": state["client_name"]}
+    start_date = date_cls.fromisoformat(state["start_date"])
+    end_date = date_cls.fromisoformat(state["end_date"])
+
+    _add_message(
+        "assistant",
+        f"Generating QBR for **{state['client_name']}** "
+        f"({start_date.strftime('%B %d, %Y')} to {end_date.strftime('%B %d, %Y')})...",
+    )
+
+    pptx_bytes, filename, health_score = run_qbr_generation(
+        selected_client=selected_client,
+        start_date=start_date,
+        end_date=end_date,
+        msp_contact=state.get("msp_contact", ""),
+        use_ai=st.session_state.use_ai,
+        anthropic_key=st.session_state.anthropic_key,
+        num_recs=st.session_state.num_recs,
+        sample_size=st.session_state.sample_size,
+        bea_api_key=st.session_state.bea_key,
+        selected_industry_name=state.get("industry_name"),
+        employee_count=state.get("employee_count", 0),
+        avg_hourly_rate=state.get("avg_hourly_rate", 50.0),
+    )
+
+    if pptx_bytes:
+        st.session_state.qbr_bytes = pptx_bytes
+        st.session_state.qbr_filename = filename
+        st.session_state.health_score = health_score
+        st.session_state.results_visible = True
+        st.session_state.results_collapsed = False
+        _add_message(
+            "assistant",
+            f"QBR generated successfully for **{state['client_name']}**. "
+            f"Download it from the Results panel.",
+        )
+
+    # Reset conv state for next QBR (keep persisted settings)
+    st.session_state.conv_state = {}
 
 
 # ─────────────────────────────────────────────
@@ -668,160 +1238,84 @@ if (
 header_col1, header_col2 = st.columns([9, 1])
 with header_col1:
     st.title("MSP QBR Generator")
-    st.caption(
-        "Connect to your HaloPSA instance, select a client and date range, "
-        "and generate a business impact report in one click."
-    )
 with header_col2:
     if st.button("", icon=":material/settings:", key="settings_btn"):
         settings_dialog()
 
 # Connection status
-if st.session_state.authenticated:
-    st.success(
-        f"Connected to HaloPSA — {len(st.session_state.clients)} clients available"
-    )
-else:
+if not st.session_state.authenticated:
     st.info("Open Settings (gear icon) to enter your HaloPSA credentials and connect.")
-    st.stop()
 
-# ── Section 1: Client & Date Range ──
-with st.expander("1. Client & Date Range", expanded=True):
-    col1, col2 = st.columns([1, 1])
+# ── Two-panel layout ──
+has_results = st.session_state.qbr_bytes is not None
 
-    with col1:
-        client_options = {c["name"]: c for c in st.session_state.clients}
-        selected_name = st.selectbox(
-            "Client",
-            options=list(client_options.keys()),
-            help="Select the client for whom you want to generate the QBR.",
-        )
-        selected_client = client_options[selected_name]
+if has_results and st.session_state.results_visible:
+    chat_col, results_col = st.columns([1, 1])
+else:
+    chat_col = st.container()
+    results_col = None
 
-    with col2:
-        default_end = date.today()
-        default_start = default_end - timedelta(days=90)
-
-        date_range = st.date_input(
-            "Review Period",
-            value=(default_start, default_end),
-            help="Select the start and end date for the QBR review period.",
+# ── Chat Panel ──
+with chat_col:
+    # Welcome message if chat is empty
+    if not st.session_state.chat_history:
+        st.markdown(
+            """<div class="chat-welcome">
+            <h3 style="margin-top:0;">Welcome to the MSP QBR Generator</h3>
+            <p>I can help you generate Quarterly Business Review reports, check client health scores, and more. Try one of these:</p>
+            </div>""",
+            unsafe_allow_html=True,
         )
 
-        if isinstance(date_range, (list, tuple)) and len(date_range) == 2:
-            start_date, end_date = date_range
-        else:
-            st.warning("Please select both a start and end date.")
-            st.stop()
+        # Example prompt buttons
+        ex_col1, ex_col2 = st.columns(2)
+        with ex_col1:
+            if st.button(
+                "Generate a QBR for last quarter",
+                key="ex_qbr",
+                use_container_width=True,
+            ):
+                _add_message("user", "Generate a QBR for last quarter")
+                _handle_chat_message("Generate a QBR for last quarter")
+                st.rerun()
+            if st.button(
+                "List all clients",
+                key="ex_list",
+                use_container_width=True,
+            ):
+                _add_message("user", "List all clients")
+                _handle_chat_message("List all clients")
+                st.rerun()
+        with ex_col2:
+            if st.button(
+                "What can you do?",
+                key="ex_help",
+                use_container_width=True,
+            ):
+                _add_message("user", "What can you do?")
+                _handle_chat_message("What can you do?")
+                st.rerun()
+            if st.button(
+                "Enable AI with 5 recommendations",
+                key="ex_ai",
+                use_container_width=True,
+            ):
+                _add_message("user", "Enable AI with 5 recommendations")
+                _handle_chat_message("Enable AI with 5 recommendations")
+                st.rerun()
 
-# ── Section 1b: Client Profile ──
-with st.expander("1b. Client Profile", expanded=True):
-    profile = get_profile(selected_client["id"])
-    col1, col2 = st.columns(2)
-    with col1:
-        emp_count = st.number_input(
-            "Employee Count",
-            min_value=0,
-            value=profile["employee_count"],
-            step=1,
-            key=f"emp_count_{selected_client['id']}",
-            help="Number of employees at this client. Used for business impact calculations.",
-        )
-    with col2:
-        hourly_rate = st.number_input(
-            "Avg Loaded Hourly Rate ($)",
-            min_value=0.0,
-            value=float(profile["avg_hourly_rate"]),
-            step=5.0,
-            key=f"hourly_rate_{selected_client['id']}",
-            help="Average loaded cost per employee hour. Used to estimate dollar impact.",
-        )
-    # Persist on every render (Streamlit reruns on widget change)
-    upsert_profile(selected_client["id"], emp_count, hourly_rate)
-    st.session_state.client_employee_count = emp_count
-    st.session_state.client_avg_hourly_rate = hourly_rate
+    # Render chat history
+    for msg in st.session_state.chat_history:
+        with st.chat_message(msg["role"]):
+            st.markdown(msg["content"])
 
-# ── Section 2: Economic Context ──
-with st.expander("2. Economic Context (Optional)", expanded=True):
-    if st.session_state.bea_key:
-        from bea_insights import INDUSTRY_SECTORS
+    # Chat input
+    if prompt := st.chat_input("Type a message..."):
+        _add_message("user", prompt)
+        _handle_chat_message(prompt)
+        st.rerun()
 
-        selected_industry_name = st.selectbox(
-            "Client's Industry Sector",
-            options=list(INDUSTRY_SECTORS.keys()),
-            index=0,
-            key=f"bea_industry_{selected_client['id']}",
-        )
-        st.caption(f"BEA sector code: `{INDUSTRY_SECTORS[selected_industry_name]}`")
-    else:
-        selected_industry_name = None
-        st.info("Enter a BEA API key in Settings to include industry economic context.")
-
-# ── Section 3: MSP Contact Info & Manual Recommendations ──
-with st.expander("3. MSP Contact Info", expanded=True):
-    msp_contact = st.text_input(
-        "Account Manager Contact",
-        placeholder="Jane Doe | jdoe@yourmsp.com | (555) 123-4567",
-    )
-
-    if not st.session_state.use_ai:
-        st.markdown("---")
-        st.markdown("**Manual Recommendations**")
-        st.caption(
-            "AI recommendations are disabled. Enter recommendations manually below."
-        )
-        manual_recs_list = []
-        for i in range(st.session_state.num_recs):
-            manual_recs_list.append(
-                st.text_input(f"Recommendation {i + 1}", key=f"manual_rec_{i}")
-            )
-
-# ── Section 4: Generate QBR ──
-with st.expander("4. Generate QBR", expanded=True):
-    generate_btn = st.button(
-        "Generate QBR Report", type="primary", use_container_width=True
-    )
-
-    if generate_btn:
-        if not msp_contact:
-            st.warning("Please enter your MSP contact information before generating.")
-        elif start_date >= end_date:
-            st.warning("Start date must be before end date.")
-        elif st.session_state.use_ai and not st.session_state.anthropic_key:
-            st.warning(
-                "An Anthropic API key is required for AI Recommendations. "
-                "Enter it in Settings, or toggle off AI Recommendations."
-            )
-        else:
-            manual_recs = None
-            if not st.session_state.use_ai:
-                manual_recs = [
-                    st.session_state.get(f"manual_rec_{i}", "")
-                    for i in range(st.session_state.num_recs)
-                ]
-
-            pptx_bytes, filename, health_score = run_qbr_generation(
-                selected_client=selected_client,
-                start_date=start_date,
-                end_date=end_date,
-                msp_contact=msp_contact,
-                use_ai=st.session_state.use_ai,
-                anthropic_key=st.session_state.anthropic_key,
-                num_recs=st.session_state.num_recs,
-                sample_size=st.session_state.sample_size,
-                manual_recs=manual_recs,
-                bea_api_key=st.session_state.bea_key,
-                selected_industry_name=selected_industry_name,
-                employee_count=st.session_state.client_employee_count,
-                avg_hourly_rate=st.session_state.client_avg_hourly_rate,
-            )
-
-            if pptx_bytes:
-                st.session_state.qbr_bytes = pptx_bytes
-                st.session_state.qbr_filename = filename
-                st.session_state.health_score = health_score
-                st.success(f"QBR generated successfully for **{selected_name}**!")
-
-# ── Results Dashboard ──
-if st.session_state.qbr_bytes:
-    _render_results_dashboard()
+# ── Results Panel ──
+if results_col is not None:
+    with results_col:
+        _render_results_dashboard()
