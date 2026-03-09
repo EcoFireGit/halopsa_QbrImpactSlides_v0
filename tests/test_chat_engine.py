@@ -769,3 +769,90 @@ class TestMatchIndustry:
     def test_whitespace_stripped(self):
         result = match_industry("  finance  ")
         assert result == "Finance & Insurance"
+
+
+# ── Intent.SHOW_SLACK_MESSAGES ───────────────────────────────────────
+
+
+class TestParseIntentRegexShowSlackMessages:
+    def test_slack_messages(self):
+        intent, _ = parse_intent_regex("Show Slack messages for Acme")
+        assert intent == Intent.SHOW_SLACK_MESSAGES
+
+    def test_slack_messages_variant(self):
+        intent, _ = parse_intent_regex("show me slack messages")
+        assert intent == Intent.SHOW_SLACK_MESSAGES
+
+    def test_slack_for_client(self):
+        intent, _ = parse_intent_regex("slack for Terry's Chocolates")
+        assert intent == Intent.SHOW_SLACK_MESSAGES
+
+    def test_slack_channel(self):
+        intent, _ = parse_intent_regex("slack channel incidents")
+        assert intent == Intent.SHOW_SLACK_MESSAGES
+
+    def test_slack_activity(self):
+        intent, _ = parse_intent_regex("slack activity for Acme")
+        assert intent == Intent.SHOW_SLACK_MESSAGES
+
+    def test_slack_incidents(self):
+        intent, _ = parse_intent_regex("slack incidents for Ron's Iron works")
+        assert intent == Intent.SHOW_SLACK_MESSAGES
+
+    def test_slack_support(self):
+        intent, _ = parse_intent_regex("slack support messages")
+        assert intent == Intent.SHOW_SLACK_MESSAGES
+
+    def test_slack_alert(self):
+        intent, _ = parse_intent_regex("show slack alerts for Acme Corp")
+        assert intent == Intent.SHOW_SLACK_MESSAGES
+
+    def test_not_triggered_by_qbr(self):
+        intent, _ = parse_intent_regex("generate qbr for Acme")
+        assert intent != Intent.SHOW_SLACK_MESSAGES
+
+    def test_not_triggered_by_list_clients(self):
+        intent, _ = parse_intent_regex("list all clients")
+        assert intent != Intent.SHOW_SLACK_MESSAGES
+
+
+class TestShowSlackMessagesParamExtraction:
+    def test_extracts_client_name(self):
+        _, params = parse_intent_regex("Show Slack messages for Acme Corp")
+        assert params.get("client_name") == "Acme Corp"
+
+    def test_extracts_client_name_with_channel(self):
+        _, params = parse_intent_regex(
+            "Show Slack messages for Acme Corp in #incidents"
+        )
+        assert params.get("client_name") == "Acme Corp"
+
+    def test_extracts_channel_hash(self):
+        _, params = parse_intent_regex("Show Slack messages in #incidents for Acme")
+        assert params.get("channel") == "incidents"
+
+    def test_extracts_channel_keyword(self):
+        _, params = parse_intent_regex("Show incidents channel Slack messages")
+        assert params.get("channel") == "incidents"
+
+    def test_extracts_sentiment_negative(self):
+        _, params = parse_intent_regex("Show negative Slack messages for Acme")
+        assert params.get("sentiment") == "negative"
+
+    def test_extracts_sentiment_positive(self):
+        _, params = parse_intent_regex("Show positive Slack messages for Acme")
+        assert params.get("sentiment") == "positive"
+
+    def test_extracts_sentiment_neutral(self):
+        _, params = parse_intent_regex("Show neutral Slack messages")
+        assert params.get("sentiment") == "neutral"
+
+    def test_no_params_on_bare_message(self):
+        _, params = parse_intent_regex("Show Slack messages")
+        assert params.get("client_name") is None
+        assert params.get("channel") is None
+        assert params.get("sentiment") is None
+
+    def test_no_spurious_sentiment(self):
+        _, params = parse_intent_regex("Show Slack messages for Acme")
+        assert params.get("sentiment") is None
