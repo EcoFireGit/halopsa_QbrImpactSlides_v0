@@ -332,14 +332,15 @@ def generate_messages_for_client(
 _CLIENT_PROFILES_PATH = os.path.join(os.path.dirname(__file__), "client_profiles.json")
 
 _FALLBACK_CLIENTS = [
-    {"id": 1, "name": "Acme Corporation"},
-    {"id": 2, "name": "Globex Industries"},
-    {"id": 3, "name": "Initech Solutions"},
-    {"id": 4, "name": "Umbrella Technologies"},
-    {"id": 5, "name": "Hooli Enterprises"},
-    {"id": 6, "name": "Pied Piper LLC"},
-    {"id": 7, "name": "Dunder Mifflin Paper"},
-    {"id": 8, "name": "Vandelay Industries"},
+    {"id": 1, "name": "Acme Corp"},
+    {"id": 2, "name": "Acorn Construction"},
+    {"id": 3, "name": "Create"},
+    {"id": 4, "name": "Freston Cakes and Bakes"},
+    {"id": 5, "name": "Mario and Luigi's Pizza Place"},
+    {"id": 6, "name": "Ron's Iron works"},
+    {"id": 7, "name": "St Johns High School"},
+    {"id": 8, "name": "Terry's Chocolates"},
+    {"id": 9, "name": "Tony's Tyre Emporium"},
 ]
 
 
