@@ -81,3 +81,65 @@ The `tests/` directory contains unit tests for all core business logic modules:
 | `test_chat_preferences.py` | `chat_preferences.py` (AI settings, client industry, MSP contact persistence) |
 
 Note: `calculate_health_score()` uses Python 3 banker's rounding (`round()` rounds half-to-even), so `round(12.5)` returns `12`, not `13`.
+
+## HaloPSA API Credentials Setup
+
+This app authenticates to HaloPSA using **OAuth2 Client Credentials** (machine-to-machine). You need to create an API application inside HaloPSA to get a `CLIENT_ID` and `CLIENT_SECRET`.
+
+### Step 1 — Open the HaloPSA API settings
+
+1. Log into your HaloPSA instance as an **Administrator**.
+2. Click the **Configuration** icon (gear/cog, top-right corner of the nav bar).
+3. In the left-hand tree, navigate to **Integrations** > **HaloPSA API**.
+
+> If you don't see this menu item, your account may not have admin privileges, or the API feature may be disabled for your tier. Contact your HaloPSA administrator.
+
+### Step 2 — Create a new Application
+
+1. Click the **Applications** tab (it may already be the default view).
+2. Click **New** (or **+**) to create a new API application.
+3. Fill in the form:
+   - **Name**: anything descriptive, e.g. `QBR Generator`
+   - **Authentication Method**: select **Client ID and Secret (Services)**  
+     *(This is the machine-to-machine flow — do not choose "Authorisation Code".)*
+   - **Login Type**: select **Agent**
+   - **Agent**: choose the HaloPSA agent/user this app will impersonate when fetching data. Use a dedicated service account if possible.
+4. Under **Permissions**, enable at minimum:
+   - `read:tickets` — to fetch ticket data
+   - `read:clients` — to list clients
+5. Click **Save**.
+
+### Step 3 — Copy the credentials
+
+After saving, HaloPSA displays the generated credentials:
+
+| HaloPSA field | .env variable |
+|---|---|
+| **Application ID** (or Client ID) | `CLIENT_ID` |
+| **Application Secret** (or Client Secret) | `CLIENT_SECRET` |
+
+Copy both values immediately. The secret is shown **only once** on initial creation — if you miss it, you must regenerate it (which invalidates the old one).
+
+### Step 4 — Find your other .env values
+
+| .env variable | Where to find it |
+|---|---|
+| `HALO_HOST` | The base URL of your HaloPSA instance, e.g. `https://yourcompany.halopsa.com`. No trailing slash. |
+| `HALO_SCOPE` | Set to `all` for full API access. Some installs use a custom scope name — check with your HaloPSA admin if `all` is rejected. |
+| `ANTHROPIC_API_KEY` | Your Anthropic Console API key (required only if AI recommendations are enabled). |
+| `BEA_API_KEY` | Free key from the U.S. Bureau of Economic Analysis — register at bea.gov/API/signup (required only for BEA economic context panel). |
+
+### Step 5 — Populate .env
+
+Create a `.env` file in the project root (it is gitignored):
+
+```bash
+HALO_HOST=https://yourcompany.halopsa.com
+CLIENT_ID=your-client-id-here
+CLIENT_SECRET=your-client-secret-here
+HALO_SCOPE=all
+ANTHROPIC_API_KEY=sk-ant-...
+BEA_API_KEY=your-bea-key-here
+```
+
+Once `.env` is present, the app auto-connects on launch (no need to re-enter credentials in the UI). You can also enter or update them at any time via the gear icon in the app header.
