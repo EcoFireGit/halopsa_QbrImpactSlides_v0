@@ -1,5 +1,5 @@
 """
-MSP QBR Generator - Chat-Driven Streamlit Web App
+MSP Growth Engine - Chat-Driven Streamlit Web App
 Natural language chat interface with results dashboard panel.
 
 Prerequisites:
@@ -56,7 +56,7 @@ _env_bea_key = os.environ.get("BEA_API_KEY", "")
 # ─────────────────────────────────────────────
 # PAGE CONFIG
 # ─────────────────────────────────────────────
-st.set_page_config(page_title="MSP QBR Generator", layout="wide")
+st.set_page_config(page_title="MSP Growth Engine", layout="wide")
 
 # ─────────────────────────────────────────────
 # CUSTOM CSS
@@ -232,9 +232,10 @@ st.markdown(
     .chat-welcome-hero .hero-subtitle {
         color: #6b7280;
         font-size: 0.95rem;
-        max-width: 480px;
-        line-height: 1.6;
+        max-width: 580px;
+        line-height: 1.7;
         margin: 0;
+        text-align: left;
     }
 
     /* ── Example prompt buttons as cards ── */
@@ -1448,7 +1449,7 @@ if (
 # Page header with gear icon
 header_col1, header_col2 = st.columns([9, 1])
 with header_col1:
-    st.title("MSP QBR Generator")
+    st.title("MSP Growth Engine")
 with header_col2:
     if st.button("", icon=":material/settings:", key="settings_btn"):
         settings_dialog()
@@ -1478,12 +1479,13 @@ with chat_col:
     if not st.session_state.chat_history:
         st.markdown(
             """<div class="chat-welcome-hero">
-                <div class="hero-icon"><span>Q</span></div>
-                <p class="hero-title">MSP QBR Generator</p>
+                <div class="hero-icon"><span>A</span></div>
+                <p class="hero-title">MSP Growth Engine</p>
                 <p class="hero-subtitle">
-                    Generate polished Quarterly Business Review decks, analyze client
-                    health scores, and surface risk insights -- all through natural
-                    language conversation.
+                    Hi, I'm Alysa, your dedicated Growth and Customer Success Advisor.<br><br>
+                    I live inside your delivery data (i.e. Halo PSA), CRM, and emails and slack but I also look outward across external industry data. I'm here to help you spot risks before they become churn and identify expansion opportunities before your competitors even see them coming.<br><br>
+                    I'm here to help you deliver exceptional client experiences at every touchpoint, from onboarding and QBRs to renewals, escalations, and everything in between.<br><br>
+                    To get started: I see you have some meetings taking place across your accounts today. What's your goal for these interactions?
                 </p>
             </div>""",
             unsafe_allow_html=True,
