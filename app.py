@@ -41,6 +41,11 @@ from chat_engine import (
     format_disambiguation,
     match_industry,
 )
+from slack_schema import (
+    get_messages_for_client,
+    get_messages_by_channel,
+    load_slack_data,
+)
 
 load_dotenv()
 
@@ -376,6 +381,9 @@ _defaults = {
     "conv_state": {},
     "results_visible": True,
     "results_collapsed": False,
+    # Slack state
+    "slack_messages": None,
+    "slack_query": None,
 }
 for key, default in _defaults.items():
     if key not in st.session_state:
@@ -572,6 +580,77 @@ def _render_risk_flags(risk_flags: list[dict]):
         )
 
 
+def _render_slack_panel(messages: list[dict], query: dict | None):
+    """Render Slack messages in the results panel."""
+    query = query or {}
+    client_name = query.get("client_name")
+    channel = query.get("channel")
+    sentiment = query.get("sentiment")
+
+    # Header with filter summary
+    parts = []
+    if client_name:
+        parts.append(f"**{client_name}**")
+    if channel:
+        parts.append(f"#{channel}")
+    if sentiment:
+        parts.append(f"{sentiment} sentiment")
+    title_suffix = " — " + ", ".join(parts) if parts else ""
+    st.subheader(f"Slack Messages{title_suffix}")
+    st.caption(f"{len(messages)} message(s) found")
+
+    sentiment_colors = {
+        "negative": ("#dc2626", "#fef2f2"),
+        "positive": ("#16a34a", "#f0fdf4"),
+        "neutral": ("#6b7280", "#f9fafb"),
+    }
+
+    for msg in messages:
+        s = msg.get("sentiment", "neutral")
+        text_color, bg_color = sentiment_colors.get(s, ("#6b7280", "#f9fafb"))
+        sev_label = s.upper()
+        ticket_ref = msg.get("ticket_reference")
+        ticket_html = (
+            f' <span style="font-size:0.75rem;color:#6b7280;">Ticket #{ticket_ref}</span>'
+            if ticket_ref
+            else ""
+        )
+        tags = msg.get("tags") or []
+        tag_html = "".join(
+            f'<span style="background:#e0e2ef;color:#242E65;font-size:0.7rem;'
+            f'padding:1px 6px;border-radius:4px;margin-left:4px;">{t}</span>'
+            for t in tags
+        )
+        ts = msg.get("timestamp", "")[:16].replace("T", " ")
+        sender = msg.get("sender_name", "")
+        sender_type = msg.get("sender_type", "")
+        sender_badge = (
+            '<span style="background:#242E65;color:white;font-size:0.65rem;'
+            'padding:1px 5px;border-radius:3px;margin-left:4px;">MSP</span>'
+            if sender_type == "msp_agent"
+            else ""
+        )
+        ch = msg.get("channel", "")
+        st.markdown(
+            f'<div style="background:{bg_color};border-left:4px solid {text_color};'
+            f'padding:0.6rem 0.85rem;margin-bottom:0.5rem;border-radius:8px;">'
+            f'<div style="display:flex;align-items:center;gap:0.4rem;margin-bottom:0.3rem;">'
+            f'<span style="background:{text_color};color:white;font-weight:600;'
+            f'font-size:0.65rem;padding:1px 6px;border-radius:3px;">{sev_label}</span>'
+            f'<span style="font-size:0.75rem;color:#6b7280;">#{ch}</span>'
+            f'<span style="font-size:0.75rem;color:#9ca3af;margin-left:auto;">{ts}</span>'
+            f"</div>"
+            f'<div style="color:#1a1a2e;font-size:0.9rem;margin-bottom:0.25rem;">'
+            f'{msg.get("message_text","")}'
+            f"</div>"
+            f'<div style="font-size:0.75rem;color:#6b7280;">'
+            f"{sender}{sender_badge}{ticket_html}{tag_html}"
+            f"</div>"
+            f"</div>",
+            unsafe_allow_html=True,
+        )
+
+
 def _render_results_dashboard():
     """Render the dashboard-style results view."""
     # Collapse toggle
@@ -587,6 +666,16 @@ def _render_results_dashboard():
         return
 
     st.markdown("---")
+
+    # Slack messages panel (may appear with or without a QBR)
+    if st.session_state.get("slack_messages") is not None:
+        _render_slack_panel(
+            st.session_state.slack_messages,
+            st.session_state.get("slack_query"),
+        )
+
+    if not st.session_state.qbr_bytes:
+        return
 
     # Download button
     st.download_button(
@@ -1214,6 +1303,78 @@ def _handle_chat_message(user_message: str):
             )
         return
 
+    if intent == Intent.SHOW_SLACK_MESSAGES:
+        client_name = params.get("client_name")
+        channel = params.get("channel")
+        sentiment = params.get("sentiment")
+
+        messages = []
+
+        if client_name:
+            # Try to match against HaloPSA clients first, then fall back to slack data names
+            if st.session_state.authenticated:
+                matches = resolve_client(client_name, st.session_state.clients)
+                if len(matches) == 1:
+                    messages = get_messages_for_client(matches[0]["id"])
+                    if not messages:
+                        # Fallback: match by client_name in slack data (synthetic/offline data)
+                        all_msgs = load_slack_data()
+                        messages = [
+                            m for m in all_msgs
+                            if client_name.lower() in m.client_name.lower()
+                        ]
+                elif len(matches) > 1:
+                    _add_message("assistant", format_disambiguation(matches))
+                    return
+                else:
+                    all_msgs = load_slack_data()
+                    messages = [
+                        m for m in all_msgs
+                        if client_name.lower() in m.client_name.lower()
+                    ]
+            else:
+                all_msgs = load_slack_data()
+                messages = [
+                    m for m in all_msgs
+                    if client_name.lower() in m.client_name.lower()
+                ]
+        elif channel:
+            messages = get_messages_by_channel(channel)
+        else:
+            messages = load_slack_data()
+
+        # Apply channel filter when client was also specified
+        if channel and client_name and messages:
+            messages = [m for m in messages if m.channel.lower() == channel.lower()]
+
+        # Apply sentiment filter
+        if sentiment and messages:
+            messages = [m for m in messages if m.sentiment == sentiment]
+
+        if not messages:
+            _add_message(
+                "assistant",
+                "No Slack messages found matching your query. "
+                "Run 'python populate_slack_data.py' to generate synthetic data.",
+            )
+            return
+
+        st.session_state.slack_messages = [m.to_dict() for m in messages]
+        st.session_state.slack_query = {
+            "client_name": client_name,
+            "channel": channel,
+            "sentiment": sentiment,
+        }
+        st.session_state.results_visible = True
+        st.session_state.results_collapsed = False
+
+        _add_message(
+            "assistant",
+            f"Found **{len(messages)}** Slack message(s). "
+            "See the Results panel for details.",
+        )
+        return
+
     if intent == Intent.SHOW_LAST_QBR:
         if st.session_state.qbr_bytes:
             st.session_state.results_collapsed = False
@@ -1464,7 +1625,10 @@ if not st.session_state.authenticated:
     )
 
 # ── Two-panel layout ──
-has_results = st.session_state.qbr_bytes is not None
+has_results = (
+    st.session_state.qbr_bytes is not None
+    or st.session_state.get("slack_messages") is not None
+)
 
 if has_results and st.session_state.results_visible:
     chat_col, results_col = st.columns([1, 1])

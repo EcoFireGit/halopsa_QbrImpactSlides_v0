@@ -217,4 +217,7 @@ client_profiles.json
 # Chat preferences (AI settings + per-client industry)
 chat_preferences.json
 
+# Slack message data (synthetic / live, not tracked in git)
+slack_data.json
+
 .playwright-mcp/

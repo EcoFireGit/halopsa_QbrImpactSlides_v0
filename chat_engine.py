@@ -19,6 +19,7 @@ class Intent(Enum):
     SET_CLIENT_PROFILE = "set_client_profile"
     SET_INDUSTRY = "set_industry"
     SHOW_LAST_QBR = "show_last_qbr"
+    SHOW_SLACK_MESSAGES = "show_slack_messages"
     HELP = "help"
     UNKNOWN = "unknown"
 
@@ -74,6 +75,14 @@ _INTENT_PATTERNS = [
         Intent.SHOW_LAST_QBR,
         re.compile(
             r"last\s+qbr|previous\s+qbr|recent\s+qbr",
+            re.IGNORECASE,
+        ),
+    ),
+    (
+        Intent.SHOW_SLACK_MESSAGES,
+        re.compile(
+            r"slack\s*messages?|show.*slack|slack.*for|slack.*channel|slack.*activity"
+            r"|slack.*incident|slack.*alert|slack.*support",
             re.IGNORECASE,
         ),
     ),
@@ -154,6 +163,37 @@ def _extract_params_regex(message: str, intent: Intent) -> dict:
         )
         if client_match:
             params["client_name"] = client_match.group(1).strip().strip("\"'")
+
+    elif intent == Intent.SHOW_SLACK_MESSAGES:
+        # Client name: "for <client>" — stop before "in", "channel", end
+        client_match = re.search(
+            r"(?:for|from)\s+(.+?)(?:\s+in\s+|\s+channel|\s*$|\s*\?)",
+            message,
+            re.IGNORECASE,
+        )
+        if client_match:
+            params["client_name"] = client_match.group(1).strip().strip("\"'")
+
+        # Channel: "#channel-name", "in channel-name", or "channel-name channel"
+        channel_match = re.search(
+            r"#([\w-]+)|in\s+([\w-]+)\s+channel|channel\s+#?([\w-]+)",
+            message,
+            re.IGNORECASE,
+        )
+        if channel_match:
+            params["channel"] = (
+                channel_match.group(1)
+                or channel_match.group(2)
+                or channel_match.group(3)
+            ).lower()
+
+        # Sentiment filter
+        if re.search(r"\bnegative\b", message, re.IGNORECASE):
+            params["sentiment"] = "negative"
+        elif re.search(r"\bpositive\b", message, re.IGNORECASE):
+            params["sentiment"] = "positive"
+        elif re.search(r"\bneutral\b", message, re.IGNORECASE):
+            params["sentiment"] = "neutral"
 
     return params
 
@@ -353,7 +393,7 @@ def parse_intent_llm(
 Given a user message and conversation context, extract the intent and parameters.
 
 Valid intents: generate_qbr, list_clients, show_health_score, set_ai_settings,
-set_client_profile, set_industry, show_last_qbr, help, unknown
+set_client_profile, set_industry, show_last_qbr, show_slack_messages, help, unknown
 
 Return ONLY valid JSON:
 {
@@ -368,6 +408,8 @@ Return ONLY valid JSON:
     "employee_count": "<integer or null>",
     "avg_hourly_rate": "<float or null>",
     "industry_name": "<string or null>",
+    "channel": "<string or null, Slack channel name without #>",
+    "sentiment": "<string or null, one of: positive, neutral, negative>",
     "is_skip": "<boolean, true if user wants to skip current question>"
   }
 }
@@ -450,6 +492,11 @@ def format_help_message() -> str:
 **Set industry**
 - "Acme is in healthcare"
 - "Set industry to Finance"
+
+**Slack messages**
+- "Show Slack messages for Acme Corp"
+- "Show incidents channel Slack messages for Ron's Iron works"
+- "Show negative Slack messages for Terry's Chocolates"
 
 **Other**
 - "Show last QBR" - download the most recently generated report"""
